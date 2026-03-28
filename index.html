@@ -2,13 +2,19 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>台美股智慧選股工具</title>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-:root{--bg:#0a0e17;--card:#131928;--border:#1e2a3a;--text:#e0e6ed;--muted:#7a8ba5;--accent:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--orange:#f97316}
+:root{--bg:#0a0e17;--card:#131928;--border:#1e2a3a;--text:#e0e6ed;--muted:#7a8ba5;--accent:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--orange:#f97316;
+/* Type Scale (Major Third) */
+--fs-xs:11px;--fs-sm:13px;--fs-base:15px;--fs-lg:18px;--fs-xl:22px;--fs-2xl:28px;--fs-3xl:34px;
+/* Spacing */
+--sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
+/* Radius */
+--r-sm:6px;--r-md:8px;--r-lg:12px}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,'Segoe UI','Noto Sans TC',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 .app{display:flex;height:100vh;flex-direction:row}
@@ -212,9 +218,15 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
   <div class="main">
     <div id="page-stock" class="page active">
       <div class="search-box">
-        <input id="ticker-input" placeholder="輸入代號（美股: AAPL｜台股: 2330.TW｜債券: TLT）" onkeydown="if(event.key==='Enter')analyzeStock()">
+        <select id="market-prefix" aria-label="市場選擇" style="padding:14px 12px;background:var(--card);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;outline:none;flex:0 0 auto">
+          <option value="">美股</option>
+          <option value=".TW">台股</option>
+        </select>
+        <input id="ticker-input" aria-label="股票代號搜尋" placeholder="輸入代號（如 AAPL、2330、TLT）" onkeydown="if(event.key==='Enter')analyzeStock()">
         <button onclick="analyzeStock()">分析</button>
       </div>
+      <div id="watchlist-bar"></div>
+      <div id="search-history" style="margin-bottom:12px"></div>
       <div id="stock-result"></div>
     </div>
     <div id="page-indices" class="page"><h2 style="margin-bottom:20px">台美股大盤指數</h2><div id="indices-content"></div></div>
@@ -230,7 +242,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
       <div id="news-content"></div>
     </div>
     <div id="page-journal" class="page">
-      <h2 style="margin-bottom:20px">交易日誌</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2>交易日誌</h2><button class="btn btn-sm" style="background:var(--card);border:1px solid var(--border);color:var(--muted)" onclick="exportJournalCSV()">📥 匯出 CSV</button></div>
       <div style="background:rgba(249,115,22,.12);border:1px solid var(--orange);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--orange);line-height:1.6">⚠️ 交易紀錄儲存於瀏覽器 localStorage，清除瀏覽器資料或更換裝置將導致紀錄遺失。建議定期手動備份重要資料。</div>
       <div class="card">
         <h3>新增交易紀錄</h3>
@@ -297,8 +309,33 @@ function PROXY(url) {
   return PROXIES[_lastProxyIdx || 0](url);
 }
 let _lastProxyIdx = 0;
-const _cache = {};
-const CACHE_TTL = 1000; // 1s cache for real-time
+// ============ UNIFIED DATA CACHE (TTL + LRU) ============
+const DataCache = {
+  _store: new Map(),
+  MAX: 80,
+  get(key, ttlMs) {
+    const entry = this._store.get(key);
+    if (!entry) return null;
+    if (ttlMs && Date.now() - entry.ts > ttlMs) { this._store.delete(key); return null; }
+    // LRU: move to end
+    this._store.delete(key);
+    this._store.set(key, entry);
+    return entry.val;
+  },
+  set(key, val) {
+    this._store.delete(key); // ensure fresh position
+    if (this._store.size >= this.MAX) {
+      // evict oldest (first key)
+      const oldest = this._store.keys().next().value;
+      this._store.delete(oldest);
+    }
+    this._store.set(key, { val, ts: Date.now() });
+  },
+  has(key, ttlMs) {
+    return this.get(key, ttlMs) !== null;
+  },
+};
+const CACHE_TTL = 1000; // 1s cache for real-time pFetch
 
 // ============ BOND ETF DETECTION ============
 const BOND_ETFS = new Set(['TLT','IEF','SHY','AGG','BND','LQD','HYG','JNK','VCSH','VCIT','VCLT','GOVT','BNDX','EMB','TIP','SCHZ','MUB','VGSH','VGIT','VGLT','IGSB','IGIB','IGLB','SPAB','SPTL','SPLB','SPTS','BWX','PCY','ZROZ','EDV','FLOT','SHV','BIL','SGOV','SCHO','SCHR','STIP','VTIP','IAGG','USIG','LQDH','SJNK','SHYG','ANGL','BKLN','SRLN','NEAR','MINT','JPST','GSY','FBND','FTSL','BOND','TLTW','PIMIX']);
@@ -371,7 +408,7 @@ function extractBondData(ticker, fundamentals, meta, price) {
 }
 
 async function pFetch(url, useCache) {
-  if (useCache && _cache[url] && Date.now() - _cache[url].ts < CACHE_TTL) return _cache[url].resp.clone();
+  if (useCache) { const cached = DataCache.get('pf:' + url, CACHE_TTL); if (cached) return cached.clone(); }
   // Try last successful proxy first, then fall back to others
   const order = [_lastProxyIdx, ...PROXIES.map((_,i)=>i).filter(i=>i!==_lastProxyIdx)];
   let lastErr;
@@ -385,7 +422,7 @@ async function pFetch(url, useCache) {
           throw new Error('HTTP ' + r.status);
         }
         _lastProxyIdx = pi; // remember successful proxy
-        if (useCache) { const blob = await r.blob(); _cache[url] = { ts: Date.now(), resp: new Response(blob, { headers: r.headers }) }; return _cache[url].resp.clone(); }
+        if (useCache) { const blob = await r.blob(); const resp = new Response(blob, { headers: r.headers }); DataCache.set('pf:' + url, resp); return resp.clone(); }
         return r;
       } catch (e) { lastErr = e; if (attempt === 0) await delay(500); }
     }
@@ -557,35 +594,26 @@ async function multiChart(symbols) {
 
 // ============ NAVIGATION ============
 const PAGES = ['stock', 'indices', 'sentiment', 'news', 'journal', 'calc', 'industry', 'heatmap'];
-function showPage(name) {
-  _currentPage = name;
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.sidebar nav button').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('#mobile-nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
-  const idx = PAGES.indexOf(name);
-  document.querySelectorAll('.sidebar nav button')[idx].classList.add('active');
-  document.querySelectorAll('#mobile-nav button')[idx].classList.add('active');
-  if (name === 'indices') loadIndices();
-  if (name === 'sentiment') loadSentiment();
-  if (name === 'news') loadNews('general');
-  if (name === 'journal') renderJournal();
-  if (name === 'industry') loadIndustry('global');
-  if (name === 'heatmap') loadHeatmap('us');
-}
+// showPage() is defined near the bottom with URL hash routing support
 
 // ============ STOCK ANALYSIS ============
 async function analyzeStock() {
-  const ticker = document.getElementById('ticker-input').value.trim().toUpperCase();
+  let ticker = document.getElementById('ticker-input').value.trim().toUpperCase();
   if (!ticker) return;
+  // Auto-append market suffix if user selected 台股 and ticker is numeric
+  const mktPrefix = document.getElementById('market-prefix').value;
+  if (mktPrefix && /^\d+$/.test(ticker)) ticker = ticker + mktPrefix;
+  document.getElementById('ticker-input').value = ticker; // show full ticker
   _lastAnalyzedTicker = ticker;
+  SearchHistory.add(ticker);
   const rd = document.getElementById('stock-result');
   rd.innerHTML = '<div class="loading"><div class="spinner"></div><p style="margin-top:12px">正在分析 ' + ticker + ' ...</p></div>';
   try {
     // Fetch chart + fundamentals in parallel
-    const [chart, fundamentals] = await Promise.all([
+    const [chart, fundamentals, vixDataPrefetch] = await Promise.all([
       yfChart(ticker, '6mo', '1d'),
-      yfPageFundamentals(ticker)
+      yfPageFundamentals(ticker),
+      quickPrice('^VIX').catch(() => null)  // parallel VIX fetch
     ]);
     const meta = chart.meta;
     const q = chart.indicators.quote[0];
@@ -614,8 +642,7 @@ async function analyzeStock() {
       rd.innerHTML = renderBond(ticker, meta, ta, bva, bondData, ltEntry, stEntry, currency, price, change, changePct);
     } else {
       const va = valueAnalysis(meta, fundamentals, price);
-      // Fetch VIX for sentiment scoring (non-blocking, fallback to null)
-      const vixData = await quickPrice('^VIX').catch(() => null);
+      const vixData = vixDataPrefetch; // already fetched in parallel above
       const ud = unifiedDecision(ta, va, vixData, changePct);
       const rc = riskControl(ta, va, ud, price);
       const ltEntry = longTermEntry(va, price, c, h, l, ta.atr, ud);
@@ -630,9 +657,15 @@ async function analyzeStock() {
 }
 
 // ============ K-LINE CHART ============
+let _chartInstance = null;
+let _chartObserver = null;
+
 function renderKline(id, ohlcv) {
   const el = document.getElementById(id);
   if (!el || !ohlcv.length) return;
+  // Clean up previous chart instance to prevent memory leaks
+  if (_chartInstance) { try { _chartInstance.remove(); } catch(e) {} _chartInstance = null; }
+  if (_chartObserver) { _chartObserver.disconnect(); _chartObserver = null; }
   el.innerHTML = '';
   const ch = LightweightCharts.createChart(el, {
     width: el.clientWidth, height: 350,
@@ -657,7 +690,9 @@ function renderKline(id, ohlcv) {
   const vs = ch.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', scaleMargins: { top: 0.85, bottom: 0 } });
   vs.setData(ohlcv.map(d => ({ time: d.t, value: d.v, color: d.c >= d.o ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)' })));
   ch.timeScale().fitContent();
-  new ResizeObserver(() => ch.applyOptions({ width: el.clientWidth })).observe(el);
+  _chartObserver = new ResizeObserver(() => ch.applyOptions({ width: el.clientWidth }));
+  _chartObserver.observe(el);
+  _chartInstance = ch;
 }
 
 // ============ TECHNICAL ANALYSIS ============
@@ -1191,7 +1226,9 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP
   // ══════════════════════════════════════════
   // SECTION 2: Stock Header
   // ══════════════════════════════════════════
-  const stockHeader = '<div class="card"><div class="stock-header"><div><div class="stock-name">' + (meta.longName || meta.shortName || ticker) + '</div><div style="color:var(--muted);font-size:13px">' + ticker + ' · ' + (meta.exchangeName || '') + ' · ' + new Date().toLocaleString('zh-TW') + '</div><div style="margin-top:6px">漲跌幅：' + tfBtnHtml('switchTF') + '</div></div><div style="margin-left:auto;text-align:right"><div class="stock-price">' + fp(price) + '</div><span class="stock-change ' + (up ? 'up' : 'down') + '"><span style="font-size:11px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + f(chg) + ' (' + (up ? '+' : '') + f(chgP) + '%)</span></div></div></div>';
+  const favStar = Watchlist.has(ticker) ? '★' : '☆';
+  const favBtn = '<button onclick="Watchlist.toggle(\'' + ticker + '\');Watchlist.render();analyzeStock()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--yellow);vertical-align:middle;margin-left:8px" title="' + (Watchlist.has(ticker) ? '取消收藏' : '加入收藏') + '">' + favStar + '</button>';
+  const stockHeader = '<div class="card"><div class="stock-header"><div><div class="stock-name">' + (meta.longName || meta.shortName || ticker) + favBtn + '</div><div style="color:var(--muted);font-size:13px">' + ticker + ' · ' + (meta.exchangeName || '') + ' · ' + new Date().toLocaleString('zh-TW') + '</div><div style="margin-top:6px">漲跌幅：' + tfBtnHtml('switchTF') + '</div></div><div style="margin-left:auto;text-align:right"><div class="stock-price">' + fp(price) + '</div><span class="stock-change ' + (up ? 'up' : 'down') + '"><span style="font-size:11px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + f(chg) + ' (' + (up ? '+' : '') + f(chgP) + '%)</span></div></div></div>';
 
   // ══════════════════════════════════════════
   // SECTION 3: Collapsible Detail Sections
@@ -1364,10 +1401,11 @@ const IDX = [
 ];
 
 let _idxLoaded = false;
+let _idxLoadedAt = 0;
 function switchTF(tf) {
   _chgTF = tf;
   // Force full re-render on all pages (hist closes stay cached)
-  _idxLoaded = false; _hmLoaded = {};
+  _idxLoaded = false; _idxLoadedAt = 0; _hmLoaded = {}; _hmLoadedAt = {};
   if (_currentPage === 'indices') loadIndices();
   else if (_currentPage === 'heatmap') loadHeatmap(_heatmapTab);
   else if (_currentPage === 'stock' && _lastAnalyzedTicker) analyzeStock();
@@ -1390,11 +1428,12 @@ async function loadIndices() {
         const q = quotes.find(r => r.symbol === sym);
         if (!q) continue;
         const up = q.change >= 0;
-        html += '<div class="card index-card" data-sym="' + sym + '" onclick="showIdxChart(\'' + sym + '\',\'' + name + '\')"><div class="idx-name">' + name + '</div><div class="idx-value">' + q.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div><div class="idx-change" style="color:' + (up ? 'var(--green)' : 'var(--red)') + '"><span style="font-size:10px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + q.change.toFixed(2) + ' (' + (up ? '+' : '') + q.changePct.toFixed(2) + '%)</div><div style="font-size:10px;color:var(--muted);margin-top:4px">即時更新 · 每秒刷新</div></div>';
+        html += '<div class="card index-card" data-sym="' + sym + '" onclick="showIdxChart(\'' + sym + '\',\'' + name + '\')"><div class="idx-name">' + name + '</div><div class="idx-value">' + q.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div><div class="idx-change" style="color:' + (up ? 'var(--green)' : 'var(--red)') + '"><span style="font-size:10px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + q.change.toFixed(2) + ' (' + (up ? '+' : '') + q.changePct.toFixed(2) + '%)</div><div style="font-size:10px;color:var(--muted);margin-top:4px">每 3 分鐘自動更新</div></div>';
       }
       html += '</div><div id="idx-chart-area"></div><div style="text-align:center;font-size:12px;color:var(--muted);margin-top:12px">資料來源：Yahoo Finance · ' + new Date().toLocaleString('zh-TW') + '</div>';
       div.innerHTML = html;
       _idxLoaded = true;
+      _idxLoadedAt = Date.now();
     } else {
       for (const [sym, name] of IDX) {
         const q = quotes.find(r => r.symbol === sym);
@@ -1525,6 +1564,7 @@ async function showIdxChart(sym, name) {
 
 // ============ SENTIMENT ============
 let _sentLoaded = false;
+let _sentLoadedAt = 0;
 async function loadSentiment() {
   const div = document.getElementById('sentiment-content');
   if (!_sentLoaded) div.innerHTML = '<div class="loading"><div class="spinner"></div><p style="margin-top:12px">計算市場情緒...</p></div>';
@@ -1545,7 +1585,7 @@ async function loadSentiment() {
     fgi = Math.max(0, Math.min(100, Math.round(fgi)));
 
     let sLabel, sColor, sEmoji;
-    if (fgi >= 80) { sLabel = '極度貪婪'; sColor = '#22c55e'; sEmoji = '🤑'; }
+    if (fgi >= 80) { sLabel = '極度貪婪'; sColor = 'var(--green)'; sEmoji = '🤑'; }
     else if (fgi >= 60) { sLabel = '貪婪'; sColor = '#10b981'; sEmoji = '😊'; }
     else if (fgi >= 40) { sLabel = '中性'; sColor = 'var(--yellow)'; sEmoji = '😐'; }
     else if (fgi >= 20) { sLabel = '恐懼'; sColor = 'var(--orange)'; sEmoji = '😰'; }
@@ -1562,7 +1602,7 @@ async function loadSentiment() {
 
     const qr = q => q ? '<td><b>' + q.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</b></td><td style="color:' + (q.changePct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (q.change >= 0 ? '+' : '') + q.change.toFixed(2) + ' (' + (q.changePct >= 0 ? '+' : '') + q.changePct.toFixed(2) + '%)</td>' : '<td>N/A</td><td></td>';
 
-    div.innerHTML = '<div class="grid2"><div class="card" style="text-align:center"><h3>恐懼與貪婪指數</h3><div style="font-size:56px;margin:10px 0">' + sEmoji + '</div><div style="font-size:64px;font-weight:800;color:' + sColor + ';margin:8px 0">' + fgi + '</div><div style="font-size:22px;font-weight:600;color:' + sColor + '">' + sLabel + '</div><div class="progress-bar" style="margin:16px auto;width:80%;height:10px"><div class="progress-fill" style="width:' + fgi + '%;background:linear-gradient(90deg,var(--red),var(--orange),var(--yellow),#22c55e,var(--green));height:10px"></div></div><div style="display:flex;justify-content:space-between;width:80%;margin:0 auto;font-size:11px;color:var(--muted)"><span>0 極度恐懼</span><span>50 中性</span><span>100 極度貪婪</span></div><div style="margin-top:16px;font-size:12px;color:var(--muted)">計算因子：VIX波動率 · 大盤動能 · 市場廣度 · 避險需求 · 風險偏好</div></div>' +
+    div.innerHTML = '<div class="grid2"><div class="card" style="text-align:center"><h3>恐懼與貪婪指數</h3><div style="font-size:56px;margin:10px 0">' + sEmoji + '</div><div style="font-size:64px;font-weight:800;color:' + sColor + ';margin:8px 0">' + fgi + '</div><div style="font-size:22px;font-weight:600;color:' + sColor + '">' + sLabel + '</div><div class="progress-bar" style="margin:16px auto;width:80%;height:10px"><div class="progress-fill" style="width:' + fgi + '%;background:linear-gradient(90deg,var(--red),var(--orange),var(--yellow),#10b981,var(--green));height:10px"></div></div><div style="display:flex;justify-content:space-between;width:80%;margin:0 auto;font-size:11px;color:var(--muted)"><span>0 極度恐懼</span><span>50 中性</span><span>100 極度貪婪</span></div><div style="margin-top:16px;font-size:12px;color:var(--muted)">計算因子：VIX波動率 · 大盤動能 · 市場廣度 · 避險需求 · 風險偏好</div></div>' +
       '<div class="card"><h3>各市場即時狀態</h3><table>' +
       [['S&P 500', sp], ['道瓊', g('^DJI')], ['那斯達克', nq], ['費城半導體', sox], ['台灣加權', tw], ['VIX 恐慌', vix], ['美10年債利率', tnx], ['黃金', gold], ['比特幣', btc]].map(([n, q]) => '<tr><td style="color:var(--muted)">' + n + '</td>' + qr(q) + '</tr>').join('') +
       '</table></div></div>' +
@@ -1574,6 +1614,7 @@ async function loadSentiment() {
       '</div></div></div>' +
       '<div style="text-align:center;font-size:12px;color:var(--muted);margin-top:12px">資料來源：Yahoo Finance · ' + new Date().toLocaleString('zh-TW') + ' (即時更新)</div>';
     _sentLoaded = true;
+    _sentLoadedAt = Date.now();
   } catch (e) {
     if (!_sentLoaded) div.innerHTML = '<div class="card" style="text-align:center;color:var(--red)">載入失敗：' + e.message + '<br><button class="btn btn-primary" style="margin-top:12px" onclick="loadSentiment()">重試</button></div>';
   }
@@ -1650,6 +1691,23 @@ function addJournal() {
   renderJournal();
 }
 function delJ(id) { if (!confirm('確定刪除？')) return; saveJ(getJ().filter(e => e.id !== id)); renderJournal(); }
+function exportJournalCSV() {
+  const j = getJ();
+  if (!j.length) { alert('沒有交易紀錄可匯出'); return; }
+  const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他' };
+  const header = '日期,代號,動作,價格,數量,金額,手續費,實收實付,策略,備註';
+  const rows = j.map(e => {
+    if (!e.fee) { e.amount = e.price * e.qty; e.fee = e.amount * FEE; e.net = e.action === 'buy' ? e.amount + e.fee : e.amount - e.fee; }
+    return [e.date, e.ticker, e.action === 'buy' ? '買入' : '賣出', e.price, e.qty, e.amount.toFixed(0), e.fee.toFixed(0), e.net.toFixed(0), sl[e.strategy] || e.strategy, '"' + (e.notes || '').replace(/"/g, '""') + '"'].join(',');
+  });
+  const csv = '\uFEFF' + header + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'journal_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 function renderJournal() {
   const j = getJ(), tb = document.getElementById('journal-body'), emp = document.getElementById('journal-empty'), st = document.getElementById('journal-stats');
   if (!j.length) { tb.innerHTML = ''; emp.style.display = 'block'; st.innerHTML = ''; return; }
@@ -1731,7 +1789,13 @@ function calcProfit() {
 }
 
 // ============ INDUSTRY MAP ============
-const INDUSTRY_DATA = {
+let _industryDataCache = null;
+function getIndustryData() {
+  if (_industryDataCache) return _industryDataCache;
+  _industryDataCache = _buildIndustryData();
+  return _industryDataCache;
+}
+function _buildIndustryData() { return {
   global: [
     { id:'semi', name:'半導體', icon:'🔬', cycle:'hot', cycleLabel:'當紅',
       desc:'設計、製造、封裝測試積體電路晶片，是所有電子產品的核心基礎。',
@@ -2433,17 +2497,17 @@ const INDUSTRY_DATA = {
       recovery:null, outlook:'手遊市場成熟，精品化是趨勢。鈊象商用機台出海成長亮眼。'
     }
   ]
-};
+}; }
 
 let _industryTab = 'global';
 function loadIndustry(tab) {
   _industryTab = tab;
   document.querySelectorAll('#industry-tabs button').forEach((b,i) => b.classList.toggle('active', (tab==='global'?0:1)===i));
-  const data = INDUSTRY_DATA[tab];
+  const data = getIndustryData()[tab];
   const ct = document.getElementById('industry-content');
   // Heatmap overview
   let heatHtml = '<div class="card" style="margin-bottom:20px"><h3>🌡️ 產業景氣熱力圖</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
-  const cycleColors = {hot:'#e74c3c',warm:'#f39c12',neutral:'#3498db',cool:'#8e44ad',cold:'#2c3e50'};
+  const cycleColors = {hot:'#ef4444',warm:'#f59e0b',neutral:'#3b82f6',cool:'#8b5cf6',cold:'#1e2a3a'};
   const cycleText = {hot:'🔥 當紅',warm:'☀️ 回溫',neutral:'⚖️ 中性',cool:'🌧️ 偏冷',cold:'❄️ 萎靡'};
   data.forEach(ind => {
     heatHtml += '<div onclick="showIndustryDetail(\'' + tab + '\',\'' + ind.id + '\')" style="cursor:pointer;background:' + cycleColors[ind.cycle] + ';color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;min-width:100px;text-align:center;transition:transform .2s" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">' + ind.icon + ' ' + ind.name + '<div style="font-size:11px;opacity:.85;margin-top:2px">' + cycleText[ind.cycle] + '</div></div>';
@@ -2592,6 +2656,7 @@ let _heatmapTimer = null;
 let _heatmapTab = 'us';
 
 let _hmLoaded = {};
+let _hmLoadedAt = {};
 async function loadHeatmap(tab) {
   _heatmapTab = tab;
   document.querySelectorAll('#heatmap-tabs button').forEach((b,i) => b.classList.toggle('active', (tab==='us'?0:1)===i));
@@ -2601,7 +2666,7 @@ async function loadHeatmap(tab) {
   const tickers = stocks.map(s => s.t);
   // Fetch historical closes (cached) for change calc
   await fetchHistCloses(tickers);
-  // Fetch fresh prices (no cache)
+  // Fetch fresh prices — progressive render after each batch
   const results = {};
   for (let i = 0; i < tickers.length; i += 12) {
     const batch = tickers.slice(i, i + 12);
@@ -2615,10 +2680,12 @@ async function loadHeatmap(tab) {
       } catch(e) { results[t] = { price: 0, chg: 0, chgPct: 0 }; }
     });
     await Promise.all(promises);
+    // Progressive: render what we have so far
+    renderHeatmap(tab, results);
     if (i + 12 < tickers.length) await new Promise(r => setTimeout(r, 80));
   }
-  renderHeatmap(tab, results);
   _hmLoaded[tab] = true;
+  _hmLoadedAt[tab] = Date.now();
   if (_heatmapTimer) clearInterval(_heatmapTimer);
   _heatmapTimer = setInterval(() => { if (_currentPage === 'heatmap') loadHeatmap(_heatmapTab); }, 180000);
 }
@@ -2635,7 +2702,7 @@ function renderHeatmap(tab, results) {
     sectors[s.s].push({...s, ...results[s.t]});
   });
 
-  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div>漲跌幅比較：' + tfBtnHtml('switchTF') + '</div><div style="font-size:12px;color:var(--muted)">最後更新: ' + timeStr + ' (每5秒自動更新)</div></div>';
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div>漲跌幅比較：' + tfBtnHtml('switchTF') + '</div><div style="font-size:12px;color:var(--muted)">最後更新: ' + timeStr + ' (每 3 分鐘自動更新)</div></div>';
 
   // Overall market stats
   const allStocks = stocks.map(s => ({...s, ...results[s.t]}));
@@ -2658,8 +2725,8 @@ function renderHeatmap(tab, results) {
     const pct = s.chgPct || 0;
     const intensity = Math.min(Math.abs(pct) / 5, 1);
     let bg;
-    if (pct > 0) bg = 'rgba(46,204,113,' + (0.2 + intensity * 0.8) + ')';
-    else if (pct < 0) bg = 'rgba(231,76,60,' + (0.2 + intensity * 0.8) + ')';
+    if (pct > 0) bg = 'rgba(16,185,129,' + (0.2 + intensity * 0.8) + ')';
+    else if (pct < 0) bg = 'rgba(239,68,68,' + (0.2 + intensity * 0.8) + ')';
     else bg = 'rgba(127,140,141,0.3)';
     const size = Math.max(80, 100 + Math.abs(pct) * 8);
     html += '<div onclick="document.getElementById(\'ticker-input\').value=\'' + s.t + '\';showPage(\'stock\');analyzeStock()" style="cursor:pointer;background:' + bg + ';border-radius:8px;padding:8px;width:' + size + 'px;flex-grow:1;max-width:180px;min-width:80px;text-align:center;transition:transform .2s" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">' +
@@ -2758,8 +2825,105 @@ async function refreshStockPrice(ticker) {
   } catch (e) { console.warn('Stock refresh failed:', e); }
 }
 
+// ============ SEARCH HISTORY (localStorage) ============
+const SearchHistory = {
+  KEY: 'ss_history',
+  MAX: 20,
+  get() { try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); } catch { return []; } },
+  add(ticker) {
+    let h = this.get().filter(t => t !== ticker);
+    h.unshift(ticker);
+    if (h.length > this.MAX) h = h.slice(0, this.MAX);
+    localStorage.setItem(this.KEY, JSON.stringify(h));
+    this._render();
+  },
+  _render() {
+    const el = document.getElementById('search-history');
+    if (!el) return;
+    const h = this.get().slice(0, 8);
+    if (!h.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--muted)">最近：</span>' +
+      h.map(t => '<button onclick="document.getElementById(\'ticker-input\').value=\'' + t + '\';analyzeStock()" style="padding:3px 10px;border-radius:12px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:12px;transition:all .2s">' + t + '</button>').join('') +
+      '</div>';
+  }
+};
+
+// ============ WATCHLIST / FAVORITES ============
+const Watchlist = {
+  KEY: 'ss_watchlist',
+  get() { try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); } catch { return []; } },
+  toggle(ticker) {
+    let w = this.get();
+    const idx = w.indexOf(ticker);
+    if (idx >= 0) w.splice(idx, 1); else w.unshift(ticker);
+    localStorage.setItem(this.KEY, JSON.stringify(w));
+    return idx < 0; // true if added
+  },
+  has(ticker) { return this.get().includes(ticker); },
+  render() {
+    const el = document.getElementById('watchlist-bar');
+    if (!el) return;
+    const w = this.get();
+    if (!w.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><span style="font-size:11px;color:var(--muted)">⭐ 收藏：</span>' +
+      w.map(t => '<button onclick="document.getElementById(\'ticker-input\').value=\'' + t + '\';analyzeStock()" style="padding:4px 12px;border-radius:12px;border:1px solid var(--accent);background:rgba(59,130,246,.1);color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;transition:all .2s">' + t + '</button>').join('') +
+      '</div>';
+  }
+};
+
+// ============ KEYBOARD SHORTCUTS ============
+document.addEventListener('keydown', (e) => {
+  // Skip if user is typing in an input/textarea
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    if (e.key === 'Escape') { e.target.blur(); closeModal(); }
+    return;
+  }
+  if (e.key === '/') {
+    e.preventDefault();
+    document.getElementById('ticker-input').focus();
+  }
+  if (e.key === 'Escape') {
+    closeModal();
+  }
+  if (e.altKey && e.key >= '1' && e.key <= '8') {
+    e.preventDefault();
+    showPage(PAGES[parseInt(e.key) - 1]);
+  }
+});
+
+// ============ URL HASH ROUTING ============
+function showPage(name) {
+  _currentPage = name;
+  history.replaceState(null, '', '#' + name);
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#mobile-nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  const idx = PAGES.indexOf(name);
+  document.querySelectorAll('.sidebar nav button')[idx].classList.add('active');
+  document.querySelectorAll('#mobile-nav button')[idx].classList.add('active');
+  const STALE_MS = 120000; // 2 minutes — show cached data if fresh enough
+  if (name === 'indices') { if (!_idxLoaded || Date.now() - _idxLoadedAt > STALE_MS) loadIndices(); }
+  if (name === 'sentiment') { if (!_sentLoaded || Date.now() - _sentLoadedAt > STALE_MS) loadSentiment(); }
+  if (name === 'news') loadNews('general');
+  if (name === 'journal') renderJournal();
+  if (name === 'industry') loadIndustry('global');
+  if (name === 'heatmap') { if (!_hmLoaded['us'] || Date.now() - (_hmLoadedAt['us']||0) > STALE_MS) loadHeatmap('us'); }
+}
+
 // ============ INIT ============
 document.getElementById('j-date').valueAsDate = new Date();
+// Restore page from URL hash
+const _initHash = location.hash.slice(1);
+if (PAGES.includes(_initHash)) { showPage(_initHash); }
+window.addEventListener('hashchange', () => {
+  const page = location.hash.slice(1);
+  if (PAGES.includes(page)) showPage(page);
+});
+// Render search history + watchlist on load
+SearchHistory._render();
+Watchlist.render();
 startAutoRefresh();
 </script>
 </body>
