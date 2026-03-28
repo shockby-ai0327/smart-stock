@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────
+# Build v2 + Deploy entire site (v1 root + v2 subfolder)
+#
+# URLs:
+#   https://shockby-ai0327.github.io/smart-stock/     → v1
+#   https://shockby-ai0327.github.io/smart-stock/v2/  → v2
+# ─────────────────────────────────────────────
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Build v2 static site
+      - name: Build v2
+        working-directory: v2-src
+        run: |
+          npm ci
+          npm run build
+          node scripts/post-export.js
+
+      # Assemble: v1 root files + v2/ build output
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r v2-src/out _site/v2
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
