@@ -56,6 +56,17 @@ th,td{padding:7px 8px;font-size:12px}
 .card h3{font-size:13px}
 .edu-card{grid-template-columns:1fr!important}
 .unified-signal{font-size:36px;letter-spacing:4px}
+.decision-card{padding:14px !important}
+.decision-signal{font-size:36px;letter-spacing:4px}
+.decision-top{gap:12px}
+.score-ring{width:72px;height:72px}
+.score-ring-inner{width:58px;height:58px}
+.score-ring-num{font-size:22px}
+.mini-dim-label{min-width:85px;font-size:11px}
+.detail-summary{padding:12px 14px;font-size:13px}
+.detail-body{padding:0 14px 14px}
+.decision-action-item{min-width:60px;padding:6px}
+.decision-action-val{font-size:13px}
 }
 .signal{display:inline-block;padding:6px 16px;border-radius:20px;font-weight:600;font-size:14px}
 .signal.buy{background:rgba(16,185,129,.15);color:var(--green)}
@@ -121,6 +132,38 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
 .modal{background:var(--card);border:1px solid var(--border);border-radius:16px;max-width:800px;width:100%;max-height:80vh;overflow-y:auto;padding:24px}
 .modal-close{float:right;background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1}
+/* Decision Header */
+.decision-card{padding:20px !important}
+.decision-top{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.decision-left{flex:1}
+.decision-signal{font-size:48px;font-weight:800;letter-spacing:6px;line-height:1.1}
+.decision-conf{font-size:14px;color:var(--muted);margin-top:6px}
+.decision-veto{display:inline-block;margin-top:8px;padding:4px 12px;border-radius:16px;font-size:11px;font-weight:600;border:1px solid}
+.score-ring{width:90px;height:90px;border-radius:50%;background:conic-gradient(var(--ring-color) var(--ring-pct), var(--border) var(--ring-pct));display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.score-ring-inner{width:72px;height:72px;border-radius:50%;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.score-ring-num{font-size:28px;font-weight:800;line-height:1}
+.score-ring-label{font-size:10px;color:var(--muted)}
+.decision-dims{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-top:1px solid var(--border);margin-top:14px}
+.mini-dim{display:flex;align-items:center;gap:10px}
+.mini-dim-label{font-size:12px;color:var(--muted);min-width:100px;white-space:nowrap}
+.mini-dim-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.mini-dim-fill{height:100%;border-radius:3px;transition:width .3s}
+.mini-dim-val{font-size:13px;font-weight:700;min-width:28px;text-align:right}
+.decision-reasons{padding:14px 0;border-top:1px solid var(--border)}
+.decision-reasons-title{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px}
+.decision-reason{font-size:13px;line-height:1.6;padding:4px 0;color:var(--text)}
+.decision-action{display:flex;gap:12px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap}
+.decision-action-item{flex:1;min-width:80px;text-align:center;padding:8px;background:var(--bg);border-radius:8px}
+.decision-action-label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
+.decision-action-val{font-size:15px;font-weight:700}
+/* Collapsible Details */
+.detail-section{margin-bottom:8px;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--card)}
+.detail-summary{padding:14px 18px;font-size:14px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;color:var(--text);user-select:none}
+.detail-summary::-webkit-details-marker{display:none}
+.detail-summary::before{content:'▸';font-size:12px;color:var(--muted);transition:transform .2s;display:inline-block;width:14px}
+details[open] > .detail-summary::before{transform:rotate(90deg)}
+.detail-body{padding:0 18px 18px}
+/* Unified steps (kept for scoring detail) */
 .unified-signal{font-size:56px;font-weight:800;letter-spacing:8px}
 .unified-step{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
 .unified-step:last-child{border-bottom:none}
@@ -768,7 +811,46 @@ function unifiedDecision(ta, va, vixData, stockChgPct) {
   const confidence = Math.min(100, Math.round(distFromCenter * 2.5));
   const confLabel = confidence >= 70 ? '高' : confidence >= 40 ? '中等' : '低';
 
-  return { signal, totalScore, fundScore, techScore, sentScore, confidence, confLabel, steps, vetoed, sentFactors };
+  // ── Top 3 reasons (for 10-second decision header) ──
+  const topReasons = [];
+  // Priority 1: guardrail veto
+  if (vetoed) topReasons.push('⚡ ' + vetoed);
+  // Collect scored reasons from all dimensions
+  const scored = [];
+  // Value factors: '+' is positive, '-' is negative
+  (va.factors || []).forEach(ff => {
+    const w = ff.i === '+' ? 1 : ff.i === '-' ? -1 : 0;
+    scored.push({ text: '💎 ' + ff.n, dim: 'fund', weight: Math.abs(w), align: signal === 'buy' ? w : -w });
+  });
+  // Technical signals: 'b' is buy, 's' is sell
+  (ta.sigs || []).forEach(s => {
+    const w = s.t === 'b' ? 1 : -1;
+    scored.push({ text: '📊 ' + s.n, dim: 'tech', weight: 1, align: signal === 'buy' ? w : -w });
+  });
+  // Sentiment factors
+  sentFactors.forEach(sf => {
+    if (sf.includes('預設') || sf.includes('不可用') || sf.includes('中性')) return;
+    const positive = sf.includes('樂觀') || sf.includes('穩定') || sf.includes('上漲') || sf.includes('上攻') || sf.includes('積極') || sf.includes('極低');
+    const w = positive ? 1 : -1;
+    scored.push({ text: '🧠 ' + sf, dim: 'sent', weight: 1, align: signal === 'buy' ? w : -w });
+  });
+  // Sort: aligned reasons first (supporting the decision), then by weight
+  scored.sort((a, b) => b.align - a.align || b.weight - a.weight);
+  // Pick top reasons from diverse dimensions
+  const usedDims = new Set();
+  for (const r of scored) {
+    if (topReasons.length >= 3) break;
+    if (usedDims.size < 2 && usedDims.has(r.dim) && scored.some(x => !usedDims.has(x.dim) && topReasons.indexOf(x.text) === -1)) continue;
+    topReasons.push(r.text);
+    usedDims.add(r.dim);
+  }
+  // Fill remaining if < 3
+  for (const r of scored) {
+    if (topReasons.length >= 3) break;
+    if (!topReasons.includes(r.text)) topReasons.push(r.text);
+  }
+
+  return { signal, totalScore, fundScore, techScore, sentScore, confidence, confLabel, steps, vetoed, sentFactors, topReasons };
 }
 
 // ============ ENTRY/EXIT ============
@@ -963,18 +1045,70 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, cur, price, chg, chgP) {
   const fp = v => v != null ? (cur === 'TWD' ? 'NT$' : '$') + f(v, 2) : 'N/A';
   const sigL = { 'strong-buy': '強烈買入', 'buy': '建議買入', 'hold': '觀望持有', 'sell': '建議賣出', 'strong-sell': '強烈賣出' };
   const sc = v => v > 15 ? 'var(--green)' : v < -15 ? 'var(--red)' : 'var(--yellow)';
+  const sc100 = v => v >= 65 ? 'var(--green)' : v <= 35 ? 'var(--red)' : 'var(--yellow)';
   const tagC = i => i === '+' ? 'rgba(16,185,129,.15);color:var(--green)' : i === '-' ? 'rgba(239,68,68,.15);color:var(--red)' : 'rgba(245,158,11,.15);color:var(--yellow)';
   const tagI = i => i === '+' ? '✓' : i === '-' ? '✗' : '◌';
   const reasonList = arr => arr.length ? '<div style="margin-top:10px;font-size:12px;line-height:1.8">' + arr.map(r => '<div style="color:var(--muted)">• ' + r + '</div>').join('') + '</div>' : '';
 
-  // Unified decision card (3-dimension scoring)
+  // ── Decision colors ──
   const udColor = ud.signal === 'buy' ? 'var(--green)' : ud.signal === 'sell' ? 'var(--red)' : 'var(--yellow)';
   const udLabel = ud.signal === 'buy' ? '買 入' : ud.signal === 'sell' ? '賣 出' : '觀 望';
   const udBg = ud.signal === 'buy' ? 'rgba(16,185,129,.08)' : ud.signal === 'sell' ? 'rgba(239,68,68,.08)' : 'rgba(245,158,11,.08)';
 
-  // Score color helper: 0-100 scale
-  const sc100 = v => v >= 65 ? 'var(--green)' : v <= 35 ? 'var(--red)' : 'var(--yellow)';
-  // Gauge bar helper
+  // ══════════════════════════════════════════
+  // SECTION 1: 10-Second Decision Header (always visible)
+  // ══════════════════════════════════════════
+  const topReasonsHtml = (ud.topReasons || []).map(r =>
+    '<div class="decision-reason">' + r + '</div>'
+  ).join('');
+
+  const scoreRing = '<div class="score-ring" style="--ring-color:' + udColor + ';--ring-pct:' + (ud.totalScore * 3.6) + 'deg">' +
+    '<div class="score-ring-inner"><span class="score-ring-num" style="color:' + udColor + '">' + ud.totalScore + '</span><span class="score-ring-label">/ 100</span></div></div>';
+
+  const miniBar = (label, score) => {
+    const c = sc100(score);
+    return '<div class="mini-dim"><span class="mini-dim-label">' + label + '</span><div class="mini-dim-bar"><div class="mini-dim-fill" style="width:' + score + '%;background:' + c + '"></div></div><span class="mini-dim-val" style="color:' + c + '">' + score + '</span></div>';
+  };
+
+  const decisionHeader =
+    '<div class="card decision-card" style="border:2px solid ' + udColor + ';background:' + udBg + '">' +
+    '<div class="decision-top">' +
+      '<div class="decision-left">' +
+        '<div class="decision-signal" style="color:' + udColor + '">' + udLabel + '</div>' +
+        '<div class="decision-conf">信心 <b style="color:' + udColor + '">' + ud.confidence + '%</b>（' + ud.confLabel + '）</div>' +
+        (ud.vetoed ? '<div class="decision-veto" style="border-color:' + udColor + ';color:' + udColor + '">⚡ ' + ud.vetoed + '</div>' : '') +
+      '</div>' +
+      scoreRing +
+    '</div>' +
+    // Mini dimension bars
+    '<div class="decision-dims">' +
+      miniBar('💎 基本面 40%', ud.fundScore) +
+      miniBar('📊 技術面 30%', ud.techScore) +
+      miniBar('🧠 情緒 30%', ud.sentScore) +
+    '</div>' +
+    // Top 3 reasons
+    '<div class="decision-reasons">' +
+      '<div class="decision-reasons-title">關鍵原因</div>' +
+      topReasonsHtml +
+    '</div>' +
+    // Quick action: entry prices
+    '<div class="decision-action">' +
+      '<div class="decision-action-item"><span class="decision-action-label">長線進場</span><span class="decision-action-val" style="color:var(--green)">' + (lt.entry ? fp(lt.entry) : '—') + '</span></div>' +
+      '<div class="decision-action-item"><span class="decision-action-label">短線進場</span><span class="decision-action-val" style="color:var(--green)">' + (st.entry ? fp(st.entry) : '—') + '</span></div>' +
+      '<div class="decision-action-item"><span class="decision-action-label">現價</span><span class="decision-action-val">' + fp(price) + '</span></div>' +
+    '</div>' +
+    '</div>';
+
+  // ══════════════════════════════════════════
+  // SECTION 2: Stock Header
+  // ══════════════════════════════════════════
+  const stockHeader = '<div class="card"><div class="stock-header"><div><div class="stock-name">' + (meta.longName || meta.shortName || ticker) + '</div><div style="color:var(--muted);font-size:13px">' + ticker + ' · ' + (meta.exchangeName || '') + ' · ' + new Date().toLocaleString('zh-TW') + '</div><div style="margin-top:6px">漲跌幅：' + tfBtnHtml('switchTF') + '</div></div><div style="margin-left:auto;text-align:right"><div class="stock-price">' + fp(price) + '</div><span class="stock-change ' + (up ? 'up' : 'down') + '"><span style="font-size:11px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + f(chg) + ' (' + (up ? '+' : '') + f(chgP) + '%)</span></div></div></div>';
+
+  // ══════════════════════════════════════════
+  // SECTION 3: Collapsible Detail Sections
+  // ══════════════════════════════════════════
+
+  // Gauge bar helper (for expanded decision detail)
   const gauge = (label, icon, score, weight) => {
     const c = sc100(score);
     const zone = score >= 65 ? '偏多' : score <= 35 ? '偏空' : '中性';
@@ -992,23 +1126,16 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, cur, price, chg, chgP) {
   });
   udStepsHtml += '</div>';
 
-  const udCard =
-    '<div class="card" style="border:2px solid ' + udColor + ';background:' + udBg + '">' +
-    '<h3 style="color:' + udColor + '">🎯 綜合投資決策</h3>' +
-    // Final signal
-    '<div style="text-align:center;padding:20px 0">' +
-    '<div class="unified-signal" style="color:' + udColor + '">' + udLabel + '</div>' +
-    '<div style="font-size:16px;color:var(--muted);margin-top:6px">總分 <b style="font-size:28px;color:' + udColor + '">' + ud.totalScore + '</b><span style="font-size:14px">/100</span>　信心：<b style="color:' + udColor + '">' + ud.confidence + '%</b>（' + ud.confLabel + '）</div>' +
-    (ud.vetoed ? '<div style="margin-top:10px;display:inline-block;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;background:' + udBg + ';border:1px solid ' + udColor + ';color:' + udColor + '">⚡ ' + ud.vetoed + '</div>' : '') +
-    '</div>' +
-    // Three gauges
-    '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:16px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">' +
+  // Detail: Scoring breakdown
+  const detailScoring =
+    '<details class="detail-section"><summary class="detail-summary">🎯 評分細節與決策推導</summary><div class="detail-body">' +
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:16px 0">' +
     gauge('基本面', '💎', ud.fundScore, '40%') +
     gauge('技術面', '📊', ud.techScore, '30%') +
     gauge('市場情緒', '🧠', ud.sentScore, '30%') +
     '</div>' +
     // Total score bar
-    '<div style="padding:16px 0;border-bottom:1px solid var(--border)">' +
+    '<div style="padding:16px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:14px;font-weight:600">總分</span><span style="font-size:24px;font-weight:800;color:' + udColor + '">' + ud.totalScore + '/100</span></div>' +
     '<div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden">' +
     '<div style="position:absolute;left:0;top:0;height:100%;width:35%;background:rgba(239,68,68,.15)"></div>' +
@@ -1018,23 +1145,73 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, cur, price, chg, chgP) {
     '</div>' +
     '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px"><span>0 賣出</span><span>35</span><span style="font-weight:600">50 觀望</span><span>65</span><span>100 買入</span></div>' +
     '</div>' +
-    // Step-by-step reasoning
     '<div style="padding-top:12px"><div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:4px">決策推導過程</div>' + udStepsHtml + '</div>' +
-    '</div>';
+    '</div></details>';
 
-  return '<div class="card"><div class="stock-header"><div><div class="stock-name">' + (meta.longName || meta.shortName || ticker) + '</div><div style="color:var(--muted);font-size:13px">' + ticker + ' · ' + (meta.exchangeName || '') + ' · ' + new Date().toLocaleString('zh-TW') + '</div><div style="margin-top:6px">漲跌幅：' + tfBtnHtml('switchTF') + '</div></div><div style="margin-left:auto;text-align:right"><div class="stock-price">' + fp(price) + '</div><span class="stock-change ' + (up ? 'up' : 'down') + '"><span style="font-size:11px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + f(chg) + ' (' + (up ? '+' : '') + f(chgP) + '%)</span></div></div></div>' +
-    udCard +
-    '<div class="card"><h3>📈 K線走勢圖（6個月）</h3><div id="stock-kline" class="chart-container"></div><div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-top:4px"><span><span style="color:#f59e0b">━</span> MA5</span><span><span style="color:#3b82f6">━</span> MA20</span><span><span style="color:#8b5cf6">━</span> MA60</span></div></div>' +
-    '<div class="grid2"><div class="card"><h3>📊 技術面綜合評分</h3><div style="text-align:center;padding:16px"><div style="font-size:48px;font-weight:700;color:' + sc(ta.score) + '">' + (ta.score > 0 ? '+' : '') + ta.score + '</div><div class="progress-bar" style="width:100%;margin:12px 0"><div class="progress-fill" style="width:' + ((ta.score + 100) / 2) + '%;background:' + sc(ta.score) + '"></div></div><span class="signal ' + ta.sig + '">' + sigL[ta.sig] + '</span></div></div>' +
-    '<div class="card"><h3>💎 價值面綜合評分</h3><div style="text-align:center;padding:16px"><div style="font-size:48px;font-weight:700;color:' + sc(va.score) + '">' + (va.score > 0 ? '+' : '') + va.score + '</div><div class="progress-bar" style="width:100%;margin:12px 0"><div class="progress-fill" style="width:' + ((va.score + 100) / 2) + '%;background:' + sc(va.score) + '"></div></div><div style="font-size:14px;color:var(--muted);margin-top:8px">' + va.verdict + '</div></div></div></div>' +
-    // Long-term value investing entry/exit
-    '<div class="card"><h3>📈 長期投資建議（價值投資）</h3><div class="grid4" style="margin-top:12px"><div class="rec-box" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3)"><div class="rec-title">長期進場價</div><div class="rec-price" style="color:var(--green)">' + (lt.entry ? fp(lt.entry) : '暫不建議進場') + '</div><div class="rec-note">' + (lt.entry ? '具安全邊際的佈局價位' : '估值偏高，等待回檔') + '</div></div><div class="rec-box" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)"><div class="rec-title">長期停損價</div><div class="rec-price" style="color:var(--red)">' + (lt.stop ? fp(lt.stop) : 'N/A') + '</div><div class="rec-note">基本面惡化停損線</div></div><div class="rec-box" style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3)"><div class="rec-title">長期目標價</div><div class="rec-price" style="color:var(--accent)">' + (lt.exit ? fp(lt.exit) : 'N/A') + '</div><div class="rec-note">基於估值的合理目標</div></div><div class="rec-box" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)"><div class="rec-title">風險報酬比</div><div class="rec-price" style="color:var(--yellow)">' + (lt.rr || 'N/A') + '</div><div class="rec-note">' + (lt.rr && lt.rr >= 2 ? '✓ 值得長期佈局' : '建議 ≥ 2.0') + '</div></div></div>' + reasonList(lt.reasons) + '</div>' +
-    // Short-term technical entry/exit
-    '<div class="card"><h3>⚡ 短期交易建議（技術分析）</h3><div class="grid4" style="margin-top:12px"><div class="rec-box" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3)"><div class="rec-title">短線進場價</div><div class="rec-price" style="color:var(--green)">' + (st.entry ? fp(st.entry) : '暫不建議進場') + '</div><div class="rec-note">' + (st.entry ? '技術面支撐位附近' : '訊號偏空，觀望為主') + '</div></div><div class="rec-box" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)"><div class="rec-title">短線停損價</div><div class="rec-price" style="color:var(--red)">' + (st.stop ? fp(st.stop) : 'N/A') + '</div><div class="rec-note">跌破支撐即停損</div></div><div class="rec-box" style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3)"><div class="rec-title">短線目標價</div><div class="rec-price" style="color:var(--accent)">' + (st.exit ? fp(st.exit) : 'N/A') + '</div><div class="rec-note">壓力位獲利了結</div></div><div class="rec-box" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)"><div class="rec-title">風險報酬比</div><div class="rec-price" style="color:var(--yellow)">' + (st.rr || 'N/A') + '</div><div class="rec-note">' + (st.rr && st.rr >= 2 ? '✓ 值得交易' : '建議 ≥ 2.0') + '</div></div></div>' + reasonList(st.reasons) + '<div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)"><span>支撐: <b style="color:var(--green)">' + fp(st.s1) + '</b> / <b style="color:var(--green)">' + fp(st.s2) + '</b></span><span>壓力: <b style="color:var(--red)">' + fp(st.r1) + '</b> / <b style="color:var(--red)">' + fp(st.r2) + '</b></span><span>ATR(14): <b>' + f(st.atr) + '</b></span></div></div>' +
-    '<div class="card"><h3>📡 技術訊號</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' + (ta.sigs.length ? ta.sigs.map(s => '<span class="tag" style="background:' + (s.t === 'b' ? 'rgba(16,185,129,.15);color:var(--green)' : 'rgba(239,68,68,.15);color:var(--red)') + '">' + (s.t === 'b' ? '▲' : '▼') + ' ' + s.n + '</span>').join('') : '<span style="color:var(--muted)">目前無明顯訊號</span>') + '</div></div>' +
-    '<div class="grid2"><div class="card"><h3>技術指標明細</h3><div class="table-wrap"><table><tr><td style="color:var(--muted)">MA5</td><td><b>' + f(ta.ma5) + '</b></td><td>' + (price > ta.ma5 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') + '</td></tr><tr><td style="color:var(--muted)">MA20</td><td><b>' + f(ta.ma20) + '</b></td><td>' + (price > ta.ma20 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') + '</td></tr><tr><td style="color:var(--muted)">MA60</td><td><b>' + f(ta.ma60) + '</b></td><td>' + (ta.ma60 ? (price > ta.ma60 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') : 'N/A') + '</td></tr><tr><td style="color:var(--muted)">RSI(14)</td><td><b>' + f(ta.rsi, 1) + '</b></td><td>' + (ta.rsi < 30 ? '<span style="color:var(--green)">超賣</span>' : ta.rsi > 70 ? '<span style="color:var(--red)">超買</span>' : '中性') + '</td></tr><tr><td style="color:var(--muted)">MACD</td><td><b>' + f(ta.macd, 4) + '</b></td><td>' + (ta.macd > ta.signal ? '<span style="color:var(--green)">多方</span>' : '<span style="color:var(--red)">空方</span>') + '</td></tr><tr><td style="color:var(--muted)">K / D</td><td><b>' + f(ta.kd.k, 1) + ' / ' + f(ta.kd.d, 1) + '</b></td><td>' + (ta.kd.k > ta.kd.d ? '<span style="color:var(--green)">K>D</span>' : '<span style="color:var(--red)">K&lt;D</span>') + '</td></tr><tr><td style="color:var(--muted)">布林通道</td><td colspan="2"><b>' + f(ta.bb.hi) + ' / ' + f(ta.bb.lo) + '</b></td></tr><tr><td style="color:var(--muted)">量比</td><td><b>' + f(ta.volRatio, 2) + 'x</b></td><td>' + (ta.volRatio > 1.5 ? '<span style="color:var(--yellow)">放量</span>' : ta.volRatio < 0.5 ? '縮量' : '正常') + '</td></tr></table></div></div>' +
-    '<div class="card"><h3>基本面指標</h3><div class="table-wrap"><table><tr><td style="color:var(--muted)">本益比(PE)</td><td><b>' + (va.pe ? f(va.pe, 1) : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">預估PE</td><td><b>' + (va.fpe ? f(va.fpe, 1) : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">股價淨值比(PB)</td><td><b>' + (va.pb ? f(va.pb, 2) : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">PEG</td><td><b>' + (va.peg ? f(va.peg, 2) : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">殖利率</td><td><b>' + (va.dy ? f(va.dy, 2) + '%' : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">ROE</td><td><b>' + (va.roe != null ? f(va.roe, 1) + '%' : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">負債比</td><td><b>' + (va.debt != null ? f(va.debt, 0) + '%' : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">利潤率</td><td><b>' + (va.pm != null ? f(va.pm, 1) + '%' : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">營收成長</td><td><b>' + (va.rg != null ? f(va.rg, 1) + '%' : 'N/A') + '</b></td></tr><tr><td style="color:var(--muted)">分析師目標價</td><td><b>' + (va.tp ? fp(va.tp) : 'N/A') + '</b> ' + (va.upside != null ? '<span style="color:' + (va.upside > 0 ? 'var(--green)' : 'var(--red)') + '">(' + f(va.upside, 1) + '%)</span>' : '') + '</td></tr></table></div></div></div>' +
-    '<div class="card"><h3>💡 價值投資分析因子</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' + (va.factors.length ? va.factors.map(ff => '<span class="tag" style="background:' + tagC(ff.i) + '">' + tagI(ff.i) + ' ' + ff.n + '</span>').join('') : '<span style="color:var(--muted)">基本面資料不足</span>') + '</div></div>' +
+  // Detail: K-line chart
+  const detailKline =
+    '<details class="detail-section" open><summary class="detail-summary">📈 K線走勢圖</summary><div class="detail-body">' +
+    '<div id="stock-kline" class="chart-container"></div>' +
+    '<div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-top:4px"><span><span style="color:#f59e0b">━</span> MA5</span><span><span style="color:#3b82f6">━</span> MA20</span><span><span style="color:#8b5cf6">━</span> MA60</span></div>' +
+    '</div></details>';
+
+  // Detail: Entry/Exit
+  const detailEntry =
+    '<details class="detail-section"><summary class="detail-summary">💰 進出場建議（長線 + 短線）</summary><div class="detail-body">' +
+    '<h4 style="margin:0 0 12px;font-size:14px">📈 長期投資（價值投資）</h4>' +
+    '<div class="grid4">' +
+    '<div class="rec-box" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3)"><div class="rec-title">長期進場價</div><div class="rec-price" style="color:var(--green)">' + (lt.entry ? fp(lt.entry) : '暫不建議進場') + '</div><div class="rec-note">' + (lt.entry ? '具安全邊際的佈局價位' : '估值偏高，等待回檔') + '</div></div>' +
+    '<div class="rec-box" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)"><div class="rec-title">長期停損價</div><div class="rec-price" style="color:var(--red)">' + (lt.stop ? fp(lt.stop) : 'N/A') + '</div><div class="rec-note">基本面惡化停損線</div></div>' +
+    '<div class="rec-box" style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3)"><div class="rec-title">長期目標價</div><div class="rec-price" style="color:var(--accent)">' + (lt.exit ? fp(lt.exit) : 'N/A') + '</div><div class="rec-note">基於估值的合理目標</div></div>' +
+    '<div class="rec-box" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)"><div class="rec-title">風險報酬比</div><div class="rec-price" style="color:var(--yellow)">' + (lt.rr || 'N/A') + '</div><div class="rec-note">' + (lt.rr && lt.rr >= 2 ? '✓ 值得長期佈局' : '建議 ≥ 2.0') + '</div></div>' +
+    '</div>' + reasonList(lt.reasons) +
+    '<h4 style="margin:20px 0 12px;font-size:14px">⚡ 短期交易（技術分析）</h4>' +
+    '<div class="grid4">' +
+    '<div class="rec-box" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3)"><div class="rec-title">短線進場價</div><div class="rec-price" style="color:var(--green)">' + (st.entry ? fp(st.entry) : '暫不建議進場') + '</div><div class="rec-note">' + (st.entry ? '技術面支撐位附近' : '訊號偏空，觀望為主') + '</div></div>' +
+    '<div class="rec-box" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)"><div class="rec-title">短線停損價</div><div class="rec-price" style="color:var(--red)">' + (st.stop ? fp(st.stop) : 'N/A') + '</div><div class="rec-note">跌破支撐即停損</div></div>' +
+    '<div class="rec-box" style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3)"><div class="rec-title">短線目標價</div><div class="rec-price" style="color:var(--accent)">' + (st.exit ? fp(st.exit) : 'N/A') + '</div><div class="rec-note">壓力位獲利了結</div></div>' +
+    '<div class="rec-box" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)"><div class="rec-title">風險報酬比</div><div class="rec-price" style="color:var(--yellow)">' + (st.rr || 'N/A') + '</div><div class="rec-note">' + (st.rr && st.rr >= 2 ? '✓ 值得交易' : '建議 ≥ 2.0') + '</div></div>' +
+    '</div>' + reasonList(st.reasons) +
+    '<div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted)"><span>支撐: <b style="color:var(--green)">' + fp(st.s1) + '</b> / <b style="color:var(--green)">' + fp(st.s2) + '</b></span><span>壓力: <b style="color:var(--red)">' + fp(st.r1) + '</b> / <b style="color:var(--red)">' + fp(st.r2) + '</b></span><span>ATR(14): <b>' + f(st.atr) + '</b></span></div>' +
+    '</div></details>';
+
+  // Detail: Technical signals + indicators
+  const detailTech =
+    '<details class="detail-section"><summary class="detail-summary">📊 技術面分析（評分 ' + (ta.score > 0 ? '+' : '') + ta.score + ' · ' + sigL[ta.sig] + '）</summary><div class="detail-body">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">' + (ta.sigs.length ? ta.sigs.map(s => '<span class="tag" style="background:' + (s.t === 'b' ? 'rgba(16,185,129,.15);color:var(--green)' : 'rgba(239,68,68,.15);color:var(--red)') + '">' + (s.t === 'b' ? '▲' : '▼') + ' ' + s.n + '</span>').join('') : '<span style="color:var(--muted)">目前無明顯訊號</span>') + '</div>' +
+    '<div class="table-wrap"><table>' +
+    '<tr><td style="color:var(--muted)">MA5</td><td><b>' + f(ta.ma5) + '</b></td><td>' + (price > ta.ma5 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">MA20</td><td><b>' + f(ta.ma20) + '</b></td><td>' + (price > ta.ma20 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">MA60</td><td><b>' + f(ta.ma60) + '</b></td><td>' + (ta.ma60 ? (price > ta.ma60 ? '<span style="color:var(--green)">站上</span>' : '<span style="color:var(--red)">跌破</span>') : 'N/A') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">RSI(14)</td><td><b>' + f(ta.rsi, 1) + '</b></td><td>' + (ta.rsi < 30 ? '<span style="color:var(--green)">超賣</span>' : ta.rsi > 70 ? '<span style="color:var(--red)">超買</span>' : '中性') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">MACD</td><td><b>' + f(ta.macd, 4) + '</b></td><td>' + (ta.macd > ta.signal ? '<span style="color:var(--green)">多方</span>' : '<span style="color:var(--red)">空方</span>') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">K / D</td><td><b>' + f(ta.kd.k, 1) + ' / ' + f(ta.kd.d, 1) + '</b></td><td>' + (ta.kd.k > ta.kd.d ? '<span style="color:var(--green)">K>D</span>' : '<span style="color:var(--red)">K&lt;D</span>') + '</td></tr>' +
+    '<tr><td style="color:var(--muted)">布林通道</td><td colspan="2"><b>' + f(ta.bb.hi) + ' / ' + f(ta.bb.lo) + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">量比</td><td><b>' + f(ta.volRatio, 2) + 'x</b></td><td>' + (ta.volRatio > 1.5 ? '<span style="color:var(--yellow)">放量</span>' : ta.volRatio < 0.5 ? '縮量' : '正常') + '</td></tr>' +
+    '</table></div></div></details>';
+
+  // Detail: Fundamental indicators + value factors
+  const detailFund =
+    '<details class="detail-section"><summary class="detail-summary">💎 基本面分析（' + va.verdict + '）</summary><div class="detail-body">' +
+    '<div class="table-wrap"><table>' +
+    '<tr><td style="color:var(--muted)">本益比(PE)</td><td><b>' + (va.pe ? f(va.pe, 1) : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">預估PE</td><td><b>' + (va.fpe ? f(va.fpe, 1) : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">股價淨值比(PB)</td><td><b>' + (va.pb ? f(va.pb, 2) : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">PEG</td><td><b>' + (va.peg ? f(va.peg, 2) : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">殖利率</td><td><b>' + (va.dy ? f(va.dy, 2) + '%' : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">ROE</td><td><b>' + (va.roe != null ? f(va.roe, 1) + '%' : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">負債比</td><td><b>' + (va.debt != null ? f(va.debt, 0) + '%' : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">利潤率</td><td><b>' + (va.pm != null ? f(va.pm, 1) + '%' : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">營收成長</td><td><b>' + (va.rg != null ? f(va.rg, 1) + '%' : 'N/A') + '</b></td></tr>' +
+    '<tr><td style="color:var(--muted)">分析師目標價</td><td><b>' + (va.tp ? fp(va.tp) : 'N/A') + '</b> ' + (va.upside != null ? '<span style="color:' + (va.upside > 0 ? 'var(--green)' : 'var(--red)') + '">(' + f(va.upside, 1) + '%)</span>' : '') + '</td></tr>' +
+    '</table></div>' +
+    '<div style="margin-top:12px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">價值因子</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + (va.factors.length ? va.factors.map(ff => '<span class="tag" style="background:' + tagC(ff.i) + '">' + tagI(ff.i) + ' ' + ff.n + '</span>').join('') : '<span style="color:var(--muted)">基本面資料不足</span>') + '</div></div>' +
+    '</div></details>';
+
+  // ══════════════════════════════════════════
+  // ASSEMBLE: Decision header → Stock info → Collapsible details
+  // ══════════════════════════════════════════
+  return stockHeader + decisionHeader + detailKline + detailScoring + detailEntry + detailTech + detailFund +
     '<div class="disclaimer">⚠️ 以上分析僅供參考，不構成投資建議。投資有風險，請依自身判斷做出決策。資料來源：Yahoo Finance</div>';
 }
 
