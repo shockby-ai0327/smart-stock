@@ -55,6 +55,7 @@ th,td{padding:7px 8px;font-size:12px}
 .card{padding:14px;margin-bottom:12px}
 .card h3{font-size:13px}
 .edu-card{grid-template-columns:1fr!important}
+.unified-signal{font-size:36px;letter-spacing:4px}
 }
 .signal{display:inline-block;padding:6px 16px;border-radius:20px;font-weight:600;font-size:14px}
 .signal.buy{background:rgba(16,185,129,.15);color:var(--green)}
@@ -556,7 +557,9 @@ async function analyzeStock() {
       rd.innerHTML = renderBond(ticker, meta, ta, bva, bondData, ltEntry, stEntry, currency, price, change, changePct);
     } else {
       const va = valueAnalysis(meta, fundamentals, price);
-      const ud = unifiedDecision(ta, va);
+      // Fetch VIX for sentiment scoring (non-blocking, fallback to null)
+      const vixData = await quickPrice('^VIX').catch(() => null);
+      const ud = unifiedDecision(ta, va, vixData, changePct);
       const ltEntry = longTermEntry(va, price, c, h, l, ta.atr, ud);
       const stEntry = shortTermEntry(ta, price, c, h, l, ud);
       rd.innerHTML = renderStock(ticker, meta, ta, va, ltEntry, stEntry, ud, currency, price, change, changePct);
@@ -685,57 +688,87 @@ function valueAnalysis(meta, fund, price) {
   return { pe, fpe, pb, dy, roe, debt, pm, rg, tp, peg, score, factors, verdict, upside };
 }
 
-// ============ UNIFIED DECISION ============
-function unifiedDecision(ta, va) {
-  const W_VALUE = 0.60, W_TECH = 0.40;
-  const sigLabels = {'strong-buy':'強烈買入','buy':'建議買入','hold':'觀望持有','sell':'建議賣出','strong-sell':'強烈賣出'};
+// ============ UNIFIED DECISION (3-Dimension 0-100 Scoring) ============
+function unifiedDecision(ta, va, vixData, stockChgPct) {
+  // ── Weights ──
+  const W_FUND = 0.40, W_TECH = 0.30, W_SENT = 0.30;
   const steps = [];
 
-  // Step 1: Value score
-  steps.push({ label:'價值面評分', detail: va.verdict, value: va.score });
+  // ── Dimension 1: 基本面 (0-100) ──
+  // Convert va.score [-100,100] → [0,100]
+  const fundRaw = Math.round((va.score + 100) / 2);
+  const fundScore = Math.max(0, Math.min(100, fundRaw));
+  const fundLabel = fundScore >= 70 ? '基本面強勁' : fundScore >= 50 ? '基本面中性' : fundScore >= 30 ? '基本面偏弱' : '基本面不佳';
+  steps.push({ label:'基本面', detail: fundLabel + '（PE/PB/ROE/殖利率/成長性）', value: fundScore, weight: '40%' });
 
-  // Step 2: Technical score
-  steps.push({ label:'技術面評分', detail: sigLabels[ta.sig] || ta.sig, value: ta.score });
+  // ── Dimension 2: 技術面 (0-100) ──
+  const techRaw = Math.round((ta.score + 100) / 2);
+  const techScore = Math.max(0, Math.min(100, techRaw));
+  const techLabel = techScore >= 70 ? '技術面強勢' : techScore >= 50 ? '技術面中性' : techScore >= 30 ? '技術面偏弱' : '技術面弱勢';
+  steps.push({ label:'技術面', detail: techLabel + '（均線/MACD/RSI/KD/量能）', value: techScore, weight: '30%' });
 
-  // Step 3: Weighted combination
-  const combinedScore = Math.round(va.score * W_VALUE + ta.score * W_TECH);
-  steps.push({ label:'加權綜合', detail:'價值面 60% + 技術面 40%', value: combinedScore });
-
-  // Step 4: Raw signal
-  let signal = combinedScore >= 20 ? 'buy' : combinedScore <= -20 ? 'sell' : 'hold';
-  const rawSignal = signal;
-  steps.push({ label:'初步判定', detail: signal === 'buy' ? '綜合偏多 → 買入' : signal === 'sell' ? '綜合偏空 → 賣出' : '多空均衡 → 觀望', value: signal });
-
-  // Step 5: Guardrails
-  let vetoed = null, vetoDirection = null;
-
-  // Rule A: Overvalued veto
-  if (signal === 'buy' && va.score <= -30) {
-    signal = 'hold'; vetoed = '估值嚴重偏高（價值面 ≤ -30），否決買入'; vetoDirection = 'blocked-buy';
+  // ── Dimension 3: 市場情緒 (0-100) ──
+  let sentScore = 50; // default neutral
+  const sentFactors = [];
+  // VIX component (0-40 points contribution to sentiment)
+  if (vixData && vixData.price) {
+    const vix = vixData.price;
+    if (vix < 15) { sentScore += 20; sentFactors.push('VIX ' + vix.toFixed(1) + ' 極低，市場樂觀'); }
+    else if (vix < 20) { sentScore += 10; sentFactors.push('VIX ' + vix.toFixed(1) + ' 偏低，情緒穩定'); }
+    else if (vix > 30) { sentScore -= 25; sentFactors.push('VIX ' + vix.toFixed(1) + ' 極高，市場恐慌'); }
+    else if (vix > 25) { sentScore -= 15; sentFactors.push('VIX ' + vix.toFixed(1) + ' 偏高，避險升溫'); }
+    else { sentFactors.push('VIX ' + vix.toFixed(1) + ' 中性'); }
+  } else {
+    sentFactors.push('VIX 資料不可用，使用預設值');
   }
-  // Rule B: Technical breakdown veto
-  if (signal === 'buy' && ta.score <= -40) {
-    signal = 'hold'; vetoed = '技術面嚴重破位（技術面 ≤ -40），否決買入'; vetoDirection = 'blocked-buy';
+  // Stock momentum component (recent change)
+  if (stockChgPct != null) {
+    if (stockChgPct > 3) { sentScore += 12; sentFactors.push('個股近期漲幅 +' + stockChgPct.toFixed(1) + '%，動能強'); }
+    else if (stockChgPct > 1) { sentScore += 6; sentFactors.push('個股溫和上漲 +' + stockChgPct.toFixed(1) + '%'); }
+    else if (stockChgPct < -3) { sentScore -= 12; sentFactors.push('個股近期跌幅 ' + stockChgPct.toFixed(1) + '%，賣壓重'); }
+    else if (stockChgPct < -1) { sentScore -= 6; sentFactors.push('個股溫和下跌 ' + stockChgPct.toFixed(1) + '%'); }
   }
-  // Rule C: Strong consensus buy (overrides A/B)
-  if (va.score >= 30 && ta.score >= 15) {
-    signal = 'buy'; vetoed = '價值面與技術面雙重看多（價值 ≥ 30 且技術 ≥ 15），強制買入'; vetoDirection = 'forced-buy';
-  }
-  // Rule D: Strong consensus sell (final authority)
-  if (va.score <= -20 && ta.score <= -15) {
-    signal = 'sell'; vetoed = '價值面與技術面雙重看空（價值 ≤ -20 且技術 ≤ -15），強制賣出'; vetoDirection = 'forced-sell';
-  }
+  // Volume ratio component
+  if (ta.volRatio > 1.5 && ta.score > 0) { sentScore += 8; sentFactors.push('放量上攻，買盤積極'); }
+  else if (ta.volRatio > 1.5 && ta.score < 0) { sentScore -= 8; sentFactors.push('放量下殺，恐慌賣壓'); }
+  else if (ta.volRatio < 0.5) { sentScore -= 3; sentFactors.push('量能萎縮，觀望濃厚'); }
+  sentScore = Math.max(0, Math.min(100, Math.round(sentScore)));
+  const sentLabel = sentScore >= 70 ? '情緒樂觀' : sentScore >= 50 ? '情緒中性' : sentScore >= 30 ? '情緒偏冷' : '情緒悲觀';
+  steps.push({ label:'市場情緒', detail: sentLabel + '（' + sentFactors.join('；') + '）', value: sentScore, weight: '30%' });
 
-  steps.push({ label:'護欄規則', detail: vetoed || '無觸發護欄，維持初步判定', value: signal });
+  // ── 加權總分 (0-100) ──
+  const totalScore = Math.round(fundScore * W_FUND + techScore * W_TECH + sentScore * W_SENT);
+  steps.push({ label:'加權總分', detail: '基本面×40% + 技術面×30% + 情緒×30%', value: totalScore, weight: '' });
 
-  // Step 6: Confidence
-  const absCombo = Math.abs(combinedScore);
-  const agreement = (va.score >= 0 && ta.score >= 0) || (va.score <= 0 && ta.score <= 0) ? 1.0 : 0.6;
-  const confidence = Math.min(100, Math.round(absCombo * agreement * 1.2));
+  // ── 訊號判定 ──
+  let signal = totalScore >= 65 ? 'buy' : totalScore <= 35 ? 'sell' : 'hold';
+
+  // ── 護欄規則 ──
+  let vetoed = null;
+  // A: 基本面太差不可買
+  if (signal === 'buy' && fundScore <= 25) {
+    signal = 'hold'; vetoed = '基本面分數過低（≤ 25），否決買入';
+  }
+  // B: 技術面崩潰不可買
+  if (signal === 'buy' && techScore <= 15) {
+    signal = 'hold'; vetoed = '技術面嚴重破位（≤ 15），否決買入';
+  }
+  // C: 三面都強 → 強制買入
+  if (fundScore >= 65 && techScore >= 55 && sentScore >= 55) {
+    signal = 'buy'; vetoed = '三維度均偏多，確認買入';
+  }
+  // D: 三面都弱 → 強制賣出
+  if (fundScore <= 35 && techScore <= 40 && sentScore <= 40) {
+    signal = 'sell'; vetoed = '三維度均偏空，確認賣出';
+  }
+  steps.push({ label:'最終決策', detail: vetoed || '依總分判定，無觸發護欄', value: signal === 'buy' ? '買入 Buy' : signal === 'sell' ? '賣出 Sell' : '觀望 Hold', weight: '' });
+
+  // ── Confidence ──
+  const distFromCenter = Math.abs(totalScore - 50);
+  const confidence = Math.min(100, Math.round(distFromCenter * 2.5));
   const confLabel = confidence >= 70 ? '高' : confidence >= 40 ? '中等' : '低';
-  steps.push({ label:'信心水準', detail: confLabel + '信心', value: confidence + '%' });
 
-  return { signal, confidence, confLabel, combinedScore, steps, vetoed, vetoDirection, rawSignal };
+  return { signal, totalScore, fundScore, techScore, sentScore, confidence, confLabel, steps, vetoed, sentFactors };
 }
 
 // ============ ENTRY/EXIT ============
@@ -934,19 +967,60 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, cur, price, chg, chgP) {
   const tagI = i => i === '+' ? '✓' : i === '-' ? '✗' : '◌';
   const reasonList = arr => arr.length ? '<div style="margin-top:10px;font-size:12px;line-height:1.8">' + arr.map(r => '<div style="color:var(--muted)">• ' + r + '</div>').join('') + '</div>' : '';
 
-  // Unified decision card
+  // Unified decision card (3-dimension scoring)
   const udColor = ud.signal === 'buy' ? 'var(--green)' : ud.signal === 'sell' ? 'var(--red)' : 'var(--yellow)';
   const udLabel = ud.signal === 'buy' ? '買 入' : ud.signal === 'sell' ? '賣 出' : '觀 望';
   const udBg = ud.signal === 'buy' ? 'rgba(16,185,129,.08)' : ud.signal === 'sell' ? 'rgba(239,68,68,.08)' : 'rgba(245,158,11,.08)';
-  const stepNums = ['①','②','③','④','⑤','⑥'];
-  let udStepsHtml = '<div style="margin-top:16px">';
+
+  // Score color helper: 0-100 scale
+  const sc100 = v => v >= 65 ? 'var(--green)' : v <= 35 ? 'var(--red)' : 'var(--yellow)';
+  // Gauge bar helper
+  const gauge = (label, icon, score, weight) => {
+    const c = sc100(score);
+    const zone = score >= 65 ? '偏多' : score <= 35 ? '偏空' : '中性';
+    return '<div style="flex:1;min-width:140px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:13px;font-weight:600">' + icon + ' ' + label + '</span><span style="font-size:11px;color:var(--muted)">權重 ' + weight + '</span></div><div style="font-size:32px;font-weight:800;color:' + c + ';text-align:center;margin:8px 0">' + score + '</div><div class="progress-bar" style="height:8px"><div class="progress-fill" style="width:' + score + '%;background:' + c + '"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px"><span>0 賣出</span><span>' + zone + '</span><span>100 買入</span></div></div>';
+  };
+
+  // Steps
+  const stepNums = ['①','②','③','④','⑤'];
+  let udStepsHtml = '<div style="margin-top:12px">';
   ud.steps.forEach((s, i) => {
-    const stepColor = typeof s.value === 'number' ? (s.value > 0 ? 'var(--green)' : s.value < 0 ? 'var(--red)' : 'var(--muted)') : (s.value === 'buy' ? 'var(--green)' : s.value === 'sell' ? 'var(--red)' : 'var(--yellow)');
-    const stepVal = typeof s.value === 'number' ? (s.value > 0 ? '+' : '') + s.value : s.value === 'buy' ? '買入' : s.value === 'sell' ? '賣出' : s.value === 'hold' ? '觀望' : s.value;
-    udStepsHtml += '<div class="unified-step"><span class="unified-step-num">' + stepNums[i] + '</span><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text)">' + s.label + '</div><div style="font-size:12px;color:var(--muted)">' + s.detail + '</div></div><div style="font-weight:700;color:' + stepColor + ';font-size:14px;min-width:50px;text-align:right">' + stepVal + '</div></div>';
+    const isNum = typeof s.value === 'number';
+    const stepColor = isNum ? sc100(s.value) : (s.value.includes('買入') ? 'var(--green)' : s.value.includes('賣出') ? 'var(--red)' : 'var(--yellow)');
+    const stepVal = isNum ? s.value + '/100' : s.value;
+    udStepsHtml += '<div class="unified-step"><span class="unified-step-num">' + stepNums[i] + '</span><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text)">' + s.label + (s.weight ? ' <span style="font-size:11px;color:var(--muted);font-weight:400">(' + s.weight + ')</span>' : '') + '</div><div style="font-size:12px;color:var(--muted)">' + s.detail + '</div></div><div style="font-weight:700;color:' + stepColor + ';font-size:14px;min-width:60px;text-align:right">' + stepVal + '</div></div>';
   });
   udStepsHtml += '</div>';
-  const udCard = '<div class="card" style="border:2px solid ' + udColor + ';background:' + udBg + '"><h3 style="color:' + udColor + '">🎯 綜合投資決策</h3><div style="text-align:center;padding:20px 0"><div class="unified-signal" style="color:' + udColor + '">' + udLabel + '</div><div style="font-size:15px;color:var(--muted);margin-top:8px">信心水準：<b style="color:' + udColor + '">' + ud.confidence + '%</b>（' + ud.confLabel + '）</div>' + (ud.vetoed ? '<div style="margin-top:10px;display:inline-block;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;background:' + udBg + ';border:1px solid ' + udColor + ';color:' + udColor + '">⚡ ' + ud.vetoed + '</div>' : '') + '</div><div style="border-top:1px solid var(--border);padding-top:12px"><div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:8px">決策推導過程</div>' + udStepsHtml + '</div></div>';
+
+  const udCard =
+    '<div class="card" style="border:2px solid ' + udColor + ';background:' + udBg + '">' +
+    '<h3 style="color:' + udColor + '">🎯 綜合投資決策</h3>' +
+    // Final signal
+    '<div style="text-align:center;padding:20px 0">' +
+    '<div class="unified-signal" style="color:' + udColor + '">' + udLabel + '</div>' +
+    '<div style="font-size:16px;color:var(--muted);margin-top:6px">總分 <b style="font-size:28px;color:' + udColor + '">' + ud.totalScore + '</b><span style="font-size:14px">/100</span>　信心：<b style="color:' + udColor + '">' + ud.confidence + '%</b>（' + ud.confLabel + '）</div>' +
+    (ud.vetoed ? '<div style="margin-top:10px;display:inline-block;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;background:' + udBg + ';border:1px solid ' + udColor + ';color:' + udColor + '">⚡ ' + ud.vetoed + '</div>' : '') +
+    '</div>' +
+    // Three gauges
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;padding:16px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">' +
+    gauge('基本面', '💎', ud.fundScore, '40%') +
+    gauge('技術面', '📊', ud.techScore, '30%') +
+    gauge('市場情緒', '🧠', ud.sentScore, '30%') +
+    '</div>' +
+    // Total score bar
+    '<div style="padding:16px 0;border-bottom:1px solid var(--border)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:14px;font-weight:600">總分</span><span style="font-size:24px;font-weight:800;color:' + udColor + '">' + ud.totalScore + '/100</span></div>' +
+    '<div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden">' +
+    '<div style="position:absolute;left:0;top:0;height:100%;width:35%;background:rgba(239,68,68,.15)"></div>' +
+    '<div style="position:absolute;left:35%;top:0;height:100%;width:30%;background:rgba(245,158,11,.15)"></div>' +
+    '<div style="position:absolute;left:65%;top:0;height:100%;width:35%;background:rgba(16,185,129,.15)"></div>' +
+    '<div style="position:absolute;left:' + ud.totalScore + '%;top:-2px;width:4px;height:16px;background:' + udColor + ';border-radius:2px;transform:translateX(-2px)"></div>' +
+    '</div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px"><span>0 賣出</span><span>35</span><span style="font-weight:600">50 觀望</span><span>65</span><span>100 買入</span></div>' +
+    '</div>' +
+    // Step-by-step reasoning
+    '<div style="padding-top:12px"><div style="font-size:13px;font-weight:600;color:var(--muted);margin-bottom:4px">決策推導過程</div>' + udStepsHtml + '</div>' +
+    '</div>';
 
   return '<div class="card"><div class="stock-header"><div><div class="stock-name">' + (meta.longName || meta.shortName || ticker) + '</div><div style="color:var(--muted);font-size:13px">' + ticker + ' · ' + (meta.exchangeName || '') + ' · ' + new Date().toLocaleString('zh-TW') + '</div><div style="margin-top:6px">漲跌幅：' + tfBtnHtml('switchTF') + '</div></div><div style="margin-left:auto;text-align:right"><div class="stock-price">' + fp(price) + '</div><span class="stock-change ' + (up ? 'up' : 'down') + '"><span style="font-size:11px;opacity:.7">' + TF_LABELS[_chgTF] + '</span> ' + (up ? '+' : '') + f(chg) + ' (' + (up ? '+' : '') + f(chgP) + '%)</span></div></div></div>' +
     udCard +
