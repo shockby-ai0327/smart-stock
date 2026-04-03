@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>台美股智慧選股工具</title>
+<title>機構級操盤系統 — 量化交易閉環</title>
 <script defer src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root{--bg:#0a0e17;--card:#131928;--border:#1e2a3a;--text:#e0e6ed;--muted:#7a8ba5;--accent:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--orange:#f97316;
@@ -279,6 +279,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <button class="btn btn-primary btn-sm" onclick="runDashboardScan()" id="dash-scan-btn">掃描市場</button>
         </div>
       </div>
+      <div id="dash-regime"></div>
       <div id="dash-risk-status"></div>
       <div id="dash-trade-list">
         <div style="text-align:center;padding:60px 20px;color:var(--muted)">
@@ -330,7 +331,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <div class="form-group"><label>買/賣</label><select id="j-action"><option value="buy">買入</option><option value="sell">賣出</option></select></div>
           <div class="form-group"><label>價格</label><input type="number" id="j-price" step="0.01" placeholder="150.00"></div>
           <div class="form-group"><label>數量</label><input type="number" id="j-qty" placeholder="100"></div>
-          <div class="form-group"><label>策略</label><select id="j-strategy"><option value="momentum">動能突破</option><option value="catalyst">題材帶動</option><option value="pullback">回檔反彈</option><option value="swing">波段交易</option><option value="value">價值投資</option><option value="day">當沖</option><option value="other">其他</option></select></div>
+          <div class="form-group"><label>策略</label><select id="j-strategy"><option value="momentum">🚀 動能突破</option><option value="catalyst">🔥 題材帶動</option><option value="pullback">🔄 回檔反彈</option><option value="gapgo">⚡ 跳空追擊</option><option value="meanrev">🎯 均值回歸</option><option value="swing">波段交易</option><option value="value">價值投資</option><option value="day">當沖</option><option value="other">其他</option></select></div>
           <div class="form-group"><label>手續費率</label><input type="text" value="買賣各 0.3%（自動計算）" disabled style="color:var(--orange);font-size:12px"></div>
           <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="addJournal()">新增紀錄</button></div>
           <div class="form-group full"><label>備註</label><textarea id="j-notes" placeholder="交易理由、觀察..."></textarea></div>
@@ -3194,11 +3195,247 @@ async function refreshStockPrice(ticker) {
 }
 
 // ╔══════════════════════════════════════════════════════════════╗
-// ║  SHORT-TERM TRADING SYSTEM — 半自動操盤系統                    ║
-// ║  ① Catalyst Detection  ② Strategy Engine  ③ Scanner        ║
-// ║  ④ Scoring Model  ⑤ Decision Engine  ⑥ Risk Control        ║
-// ║  ⑦ Signal System  ⑧ Claude Prompt                          ║
+// ║  INSTITUTIONAL TRADING SYSTEM — 機構級操盤閉環系統              ║
+// ║  ⓪ Market Regime  ① Catalyst  ② Strategy  ③ Scanner        ║
+// ║  ④ Scoring  ⑤ Decision  ⑥ Risk Control  ⑦ Signal           ║
+// ║  ⑧ Claude Prompt  ⑨ Execution  ⑩ Review  ⑪ Learning        ║
 // ╚══════════════════════════════════════════════════════════════╝
+
+// ============ ⓪ MARKET REGIME ENGINE ============
+// Determines Bull / Bear / Sideways from index data
+// Affects: Strategy gates, Risk scaling, Scoring weights, Decision enforcement
+
+const MarketRegime = {
+  KEY: 'ss_regime',
+  _cache: null,
+  _cacheAt: 0,
+
+  // Core detection: fetch SPY/QQQ/VIX and compute regime
+  async detect() {
+    try {
+      // Parallel fetch: S&P 500 (6mo daily), VIX current, Russell 2000
+      const [spChart, vixQ, rutQ] = await Promise.all([
+        yfChart('^GSPC', '6mo', '1d'),
+        quickPrice('^VIX').catch(() => null),
+        quickPrice('^RUT').catch(() => null),
+      ]);
+
+      const q = spChart.indicators.quote[0];
+      const closes = [], vols = [];
+      for (let i = 0; i < spChart.timestamp.length; i++) {
+        if (q.close[i] != null) { closes.push(q.close[i]); vols.push(q.volume[i] || 0); }
+      }
+
+      const price = spChart.meta.regularMarketPrice;
+      const ma20 = sma(closes, 20);
+      const ma50 = sma(closes, 50);
+      const ma200 = sma(closes.length >= 200 ? closes : closes, Math.min(closes.length, 200));
+
+      // ── Trend Score (-100 to +100) ──
+      let trendScore = 0;
+      // MA alignment
+      if (price > ma20 && ma20 > ma50) trendScore += 25;
+      else if (price < ma20 && ma20 < ma50) trendScore -= 25;
+      if (ma50 && ma200 && ma50 > ma200) trendScore += 20; // golden cross zone
+      else if (ma50 && ma200 && ma50 < ma200) trendScore -= 20; // death cross zone
+      // Price vs MAs
+      if (price > ma20) trendScore += 10; else trendScore -= 10;
+      if (ma50 && price > ma50) trendScore += 10; else if (ma50) trendScore -= 10;
+      if (ma200 && price > ma200) trendScore += 10; else if (ma200) trendScore -= 10;
+      // Recent momentum: 20-day return
+      const ret20 = closes.length >= 20 ? ((price - closes[closes.length - 20]) / closes[closes.length - 20]) * 100 : 0;
+      if (ret20 > 5) trendScore += 15;
+      else if (ret20 > 2) trendScore += 8;
+      else if (ret20 < -5) trendScore -= 15;
+      else if (ret20 < -2) trendScore -= 8;
+
+      // ── Volatility Score (0-100, higher = more volatile) ──
+      let volScore = 50;
+      const vix = vixQ ? vixQ.price : 20;
+      if (vix < 15) volScore = 15;
+      else if (vix < 20) volScore = 30;
+      else if (vix < 25) volScore = 50;
+      else if (vix < 30) volScore = 70;
+      else if (vix < 40) volScore = 85;
+      else volScore = 100;
+
+      // ── Volume Trend ──
+      const avgVol20 = avg(vols.slice(-20));
+      const avgVol5 = avg(vols.slice(-5));
+      const volTrend = avgVol20 > 0 ? avgVol5 / avgVol20 : 1;
+
+      // ── Breadth (simplified: SP500 vs Russell2000 divergence) ──
+      let breadthScore = 50;
+      if (rutQ && spChart.meta.regularMarketPrice) {
+        const spPrev = spChart.meta.chartPreviousClose || price;
+        const spChg = ((price - spPrev) / spPrev) * 100;
+        const rutPrev = rutQ.prevClose || rutQ.price;
+        const rutChg = ((rutQ.price - rutPrev) / rutPrev) * 100;
+        // If small caps outperform → breadth is healthy
+        if (rutChg > spChg + 0.3) breadthScore = 70;
+        else if (rutChg > spChg - 0.3) breadthScore = 55;
+        else breadthScore = 30; // large caps only → narrowing breadth
+      }
+
+      // ── Regime Classification ──
+      trendScore = Math.max(-100, Math.min(100, trendScore));
+      let regime, confidence;
+
+      if (trendScore >= 30 && volScore < 60) {
+        regime = 'Bull';
+        confidence = Math.min(100, Math.round(50 + trendScore * 0.4 + (60 - volScore) * 0.3));
+      } else if (trendScore <= -30 && volScore > 40) {
+        regime = 'Bear';
+        confidence = Math.min(100, Math.round(50 + Math.abs(trendScore) * 0.4 + (volScore - 40) * 0.3));
+      } else {
+        regime = 'Sideways';
+        confidence = Math.min(100, Math.round(50 + (50 - Math.abs(trendScore)) * 0.5));
+      }
+
+      // Trend strength label
+      const trendStrength = Math.abs(trendScore) > 60 ? 'Strong' : Math.abs(trendScore) > 30 ? 'Moderate' : 'Weak';
+      const volatility = volScore > 70 ? 'High' : volScore > 40 ? 'Moderate' : 'Low';
+
+      const result = {
+        regime,
+        confidence: Math.max(0, Math.min(100, confidence)),
+        trend_strength: trendStrength,
+        volatility,
+        // Raw data for downstream use
+        _trendScore: trendScore,
+        _volScore: volScore,
+        _breadthScore: breadthScore,
+        _vix: vix,
+        _ma20: ma20,
+        _ma50: ma50,
+        _ma200: ma200,
+        _spPrice: price,
+        _ret20: ret20,
+        _volTrend: volTrend,
+        _timestamp: Date.now(),
+      };
+
+      // Cache in memory and localStorage
+      this._cache = result;
+      this._cacheAt = Date.now();
+      try { localStorage.setItem(this.KEY, JSON.stringify(result)); } catch {}
+      return result;
+
+    } catch (e) {
+      console.warn('Regime detection failed:', e);
+      return this.getCached() || this._default();
+    }
+  },
+
+  // Get cached regime (from memory or localStorage)
+  getCached() {
+    // Memory cache: valid for 5 min
+    if (this._cache && Date.now() - this._cacheAt < 300000) return this._cache;
+    // localStorage cache: valid for 30 min
+    try {
+      const d = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+      if (d.regime && d._timestamp && Date.now() - d._timestamp < 1800000) {
+        this._cache = d;
+        this._cacheAt = d._timestamp;
+        return d;
+      }
+    } catch {}
+    return null;
+  },
+
+  _default() {
+    return {
+      regime: 'Sideways', confidence: 30, trend_strength: 'Weak', volatility: 'Moderate',
+      _trendScore: 0, _volScore: 50, _breadthScore: 50, _vix: 20,
+      _ma20: 0, _ma50: 0, _ma200: 0, _spPrice: 0, _ret20: 0, _volTrend: 1, _timestamp: Date.now(),
+    };
+  },
+
+  // ── Strategy gates: which strategies are allowed in this regime ──
+  getAllowedStrategies(regime) {
+    switch (regime) {
+      case 'Bull':
+        return { momentum: true, catalyst: true, pullback: true, gapgo: true, meanrev: false };
+      case 'Bear':
+        return { momentum: false, catalyst: false, pullback: true, gapgo: false, meanrev: true };
+      case 'Sideways':
+      default:
+        return { momentum: false, catalyst: true, pullback: true, gapgo: false, meanrev: true };
+    }
+  },
+
+  // ── Risk scaling: adjust position size limits by regime ──
+  getRiskMultiplier(regime) {
+    switch (regime) {
+      case 'Bull': return 1.0;    // full risk budget
+      case 'Sideways': return 0.7; // 70% risk budget
+      case 'Bear': return 0.4;    // 40% risk budget
+      default: return 0.5;
+    }
+  },
+
+  // ── Score weight adjustment by regime ──
+  getWeightAdjust(regime) {
+    // Returns additive adjustments to base weights
+    switch (regime) {
+      case 'Bull':
+        return { tech: 0.02, market: 0.02, risk: -0.04, catalyst: 0.02, regime: 0 };
+      case 'Bear':
+        return { tech: -0.03, market: -0.02, risk: 0.05, catalyst: -0.02, regime: 0.02 };
+      case 'Sideways':
+      default:
+        return { tech: 0, market: 0, risk: 0, catalyst: 0, regime: 0 };
+    }
+  },
+
+  // ── Render regime badge HTML ──
+  renderBadge(r) {
+    if (!r) return '';
+    const colors = { Bull: 'var(--green)', Bear: 'var(--red)', Sideways: 'var(--yellow)' };
+    const icons = { Bull: '🐂', Bear: '🐻', Sideways: '↔️' };
+    const bg = { Bull: 'rgba(16,185,129,.12)', Bear: 'rgba(239,68,68,.12)', Sideways: 'rgba(245,158,11,.12)' };
+    return '<div class="card" style="border-left:4px solid ' + colors[r.regime] + ';padding:14px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+        '<div style="display:flex;align-items:center;gap:10px">' +
+          '<span style="font-size:28px">' + icons[r.regime] + '</span>' +
+          '<div>' +
+            '<div style="font-size:18px;font-weight:800;color:' + colors[r.regime] + '">' + r.regime + ' Market</div>' +
+            '<div style="font-size:12px;color:var(--muted)">趨勢 ' + r.trend_strength + ' · 波動 ' + r.volatility + ' · 信心 ' + r.confidence + '%</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:12px;font-size:12px;flex-wrap:wrap">' +
+          '<span style="padding:4px 10px;border-radius:12px;background:' + bg[r.regime] + ';color:' + colors[r.regime] + ';font-weight:600">VIX ' + (r._vix || 0).toFixed(1) + '</span>' +
+          '<span style="padding:4px 10px;border-radius:12px;background:var(--bg);color:var(--muted)">SP500 ' + (r._ret20 >= 0 ? '+' : '') + (r._ret20 || 0).toFixed(1) + '% (20d)</span>' +
+          '<span style="padding:4px 10px;border-radius:12px;background:var(--bg);color:var(--muted)">Breadth ' + (r._breadthScore || 50) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.8">' +
+        this._regimeAdvice(r) +
+      '</div>' +
+    '</div>';
+  },
+
+  _regimeAdvice(r) {
+    const allowed = this.getAllowedStrategies(r.regime);
+    const stratNames = { momentum: '動能突破', catalyst: '題材帶動', pullback: '回檔反彈', gapgo: '跳空追擊', meanrev: '均值回歸' };
+    const active = Object.entries(allowed).filter(([, v]) => v).map(([k]) => stratNames[k]).join('、');
+    const blocked = Object.entries(allowed).filter(([, v]) => !v).map(([k]) => stratNames[k]).join('、');
+    const riskMul = this.getRiskMultiplier(r.regime);
+    let advice = '';
+    if (r.regime === 'Bull') {
+      advice = '📈 <b>多頭市場</b>：適合順勢做多。Momentum 和 Catalyst 策略優先。風險預算 100%。';
+    } else if (r.regime === 'Bear') {
+      advice = '📉 <b>空頭市場</b>：防守為主。僅允許 Pullback 和 Mean Reversion 策略。風險預算降至 ' + (riskMul * 100).toFixed(0) + '%。<b style="color:var(--red)">禁止追漲做多。</b>';
+    } else {
+      advice = '↔️ <b>震盪市場</b>：精選操作。Catalyst 和 Pullback 策略為主。風險預算 ' + (riskMul * 100).toFixed(0) + '%。';
+    }
+    advice += '<br>✅ 啟用策略：' + (active || '無') + ' · ❌ 禁用策略：' + (blocked || '無');
+    return advice;
+  },
+};
+
+// Global regime state — populated on dashboard scan
+let _currentRegime = MarketRegime.getCached();
 
 // ============ ① CATALYST DETECTION SYSTEM ============
 // Detects hot themes from: industry cycle data + heatmap sector performance
@@ -3379,62 +3616,96 @@ const STRATEGIES = {
 };
 
 // ============ ④ SCORING MODEL (Short-term 0-100) ============
-// Weights: Technical 40% + Market 25% + Risk 20% + Catalyst 15%
+// Weights: Technical 35% + Market 20% + Risk 20% + Catalyst 15% + Regime Fit 10%
 // Learning system can adjust these via LearningEngine.getWeights()
 
-const DEFAULT_SCORE_WEIGHTS = { tech: 0.40, market: 0.25, risk: 0.20, catalyst: 0.15 };
+const DEFAULT_SCORE_WEIGHTS = { tech: 0.35, market: 0.20, risk: 0.20, catalyst: 0.15, regime: 0.10 };
 
-function shortTermScore(ta, stratResult, catalystHeat) {
-  const w = (typeof LearningEngine !== 'undefined' && LearningEngine.getWeights) ? LearningEngine.getWeights() : DEFAULT_SCORE_WEIGHTS;
+function shortTermScore(ta, stratResult, catalystHeat, regimeFit) {
+  let w = (typeof LearningEngine !== 'undefined' && LearningEngine.getWeights) ? LearningEngine.getWeights() : { ...DEFAULT_SCORE_WEIGHTS };
+  // Ensure regime weight exists (backward compat)
+  if (!w.regime) { w.regime = 0.10; const s = w.tech + w.market + w.risk + w.catalyst + w.regime; Object.keys(w).forEach(k => w[k] /= s); }
+
+  // Apply regime-based weight adjustment
+  const regime = _currentRegime || MarketRegime._default();
+  const adj = MarketRegime.getWeightAdjust(regime.regime);
+  const wAdj = { tech: w.tech + (adj.tech||0), market: w.market + (adj.market||0), risk: w.risk + (adj.risk||0), catalyst: w.catalyst + (adj.catalyst||0), regime: w.regime + (adj.regime||0) };
+  // Normalize
+  const wSum = Object.values(wAdj).reduce((a, b) => a + b, 0) || 1;
+  Object.keys(wAdj).forEach(k => wAdj[k] = Math.max(0.05, wAdj[k] / wSum));
 
   // Technical: convert ta.score [-100,100] → [0,100]
   const techNorm = Math.max(0, Math.min(100, Math.round((ta.score + 100) / 2)));
-  const techPart = techNorm * w.tech;
+  const techPart = techNorm * wAdj.tech;
 
   // Market match: strategy match score (0-100)
-  const marketPart = (stratResult.score || 0) * w.market;
+  const marketPart = (stratResult.score || 0) * wAdj.market;
 
   // Risk: inverse of volatility
   const atrPct = ta.atr ? (ta.atr / (ta.ma20 || 1)) * 100 : 3;
   const riskRaw = atrPct > 5 ? 20 : atrPct > 3 ? 50 : atrPct > 1.5 ? 80 : 95;
-  const riskPart = riskRaw * w.risk;
+  const riskPart = riskRaw * wAdj.risk;
 
   // Catalyst: heat directly as score component
   const catNorm = Math.max(0, Math.min(100, catalystHeat || 0));
-  const catPart = catNorm * w.catalyst;
+  const catPart = catNorm * wAdj.catalyst;
 
-  let total = Math.round(techPart + marketPart + riskPart + catPart);
+  // Regime Fit: 100 if strategy allowed in current regime, 0 if not
+  const regimeScore = regimeFit ? 100 : 0;
+  const regimePart = regimeScore * wAdj.regime;
+
+  let total = Math.round(techPart + marketPart + riskPart + catPart + regimePart);
   total = Math.max(0, Math.min(100, total));
 
-  return { total, techNorm, marketMatch: stratResult.score || 0, riskRaw, catalystHeat: catNorm, weights: w };
+  return { total, techNorm, marketMatch: stratResult.score || 0, riskRaw, catalystHeat: catNorm, regimeFit: regimeFit, regimeScore, weights: wAdj };
 }
 
-// ============ ⑤ DECISION ENGINE ============
+// ============ ⑤ DECISION ENGINE (Regime-Enforced) ============
 
 function shortTermDecision(score, ta, price, catalystInfo) {
   let decision, entryLow, entryHigh, stopLoss, takeProfit, riskPct, positionPct;
   const atr = ta.atr || (price * 0.02);
+  const regime = _currentRegime || MarketRegime._default();
+  const riskMul = MarketRegime.getRiskMultiplier(regime.regime);
+  const regimeFit = score.regimeFit !== false; // default true if not set
 
   if (score.total >= 70) {
     decision = 'Buy';
     entryLow = price * 0.99;
     entryHigh = price * 1.005;
     stopLoss = price - atr * 1.5;
-    takeProfit = price + atr * 3; // R:R = 1:2
-    riskPct = 2;
-    positionPct = Math.min(25, Math.round(2 / ((atr * 1.5 / price) * 100) * 100)); // Kelly-lite
+    takeProfit = price + atr * 3;
+    riskPct = 2 * riskMul;
+    positionPct = Math.min(25 * riskMul, Math.round(riskPct / ((atr * 1.5 / price) * 100) * 100));
   } else if (score.total >= 50) {
     decision = 'Wait';
     entryLow = price * 0.97;
     entryHigh = price * 0.99;
     stopLoss = price - atr * 2;
     takeProfit = price + atr * 3;
-    riskPct = 1.5;
-    positionPct = Math.min(15, Math.round(1.5 / ((atr * 2 / price) * 100) * 100));
+    riskPct = 1.5 * riskMul;
+    positionPct = Math.min(15 * riskMul, Math.round(riskPct / ((atr * 2 / price) * 100) * 100));
   } else {
     decision = 'Avoid';
     entryLow = null; entryHigh = null; stopLoss = null; takeProfit = null;
     riskPct = 0; positionPct = 0;
+  }
+
+  // ── REGIME ENFORCEMENT ──
+  // Bear market: force downgrade Buy → Wait if not regime-fit
+  if (regime.regime === 'Bear' && decision === 'Buy' && !regimeFit) {
+    decision = 'Avoid';
+    riskPct = 0; positionPct = 0;
+  }
+  // Bear market with high VIX: extra caution
+  if (regime.regime === 'Bear' && regime._vix > 30 && decision === 'Buy') {
+    decision = 'Wait'; // demote to Wait even if regime-fit
+    positionPct = Math.round(positionPct * 0.5);
+    riskPct = riskPct * 0.5;
+  }
+  // Sideways: cap position size
+  if (regime.regime === 'Sideways' && positionPct > 15) {
+    positionPct = 15;
   }
 
   const catalystReason = catalystInfo
@@ -3443,24 +3714,29 @@ function shortTermDecision(score, ta, price, catalystInfo) {
 
   const rr = stopLoss && takeProfit ? ((takeProfit - price) / (price - stopLoss)).toFixed(1) : '—';
 
-  // Confidence: weighted average of component strengths
-  const conf = Math.round(
-    (score.techNorm >= 60 ? 30 : score.techNorm >= 40 ? 15 : 0) +
-    (score.marketMatch >= 70 ? 25 : score.marketMatch >= 50 ? 12 : 0) +
-    (score.riskRaw >= 70 ? 20 : score.riskRaw >= 50 ? 10 : 0) +
-    ((catalystInfo && catalystInfo.heat >= 50) ? 25 : (catalystInfo && catalystInfo.heat >= 30) ? 12 : 0)
+  // Confidence: weighted average of component strengths + regime bonus
+  let conf = Math.round(
+    (score.techNorm >= 60 ? 25 : score.techNorm >= 40 ? 12 : 0) +
+    (score.marketMatch >= 70 ? 20 : score.marketMatch >= 50 ? 10 : 0) +
+    (score.riskRaw >= 70 ? 15 : score.riskRaw >= 50 ? 8 : 0) +
+    ((catalystInfo && catalystInfo.heat >= 50) ? 20 : (catalystInfo && catalystInfo.heat >= 30) ? 10 : 0) +
+    (regimeFit ? 20 : 0)
   );
+  // Bear market penalty
+  if (regime.regime === 'Bear') conf = Math.round(conf * 0.7);
 
   return {
     score: score.total,
     decision,
     confidence: Math.max(0, Math.min(100, conf)),
+    regime_fit: regimeFit,
+    regime: regime.regime,
     entry_range: entryLow && entryHigh ? '$' + entryLow.toFixed(2) + ' – $' + entryHigh.toFixed(2) : '—',
     stop_loss: stopLoss ? '$' + stopLoss.toFixed(2) + ' (' + (-(1 - stopLoss/price) * 100).toFixed(1) + '%)' : '—',
     take_profit: takeProfit ? '$' + takeProfit.toFixed(2) + ' (+' + ((takeProfit/price - 1) * 100).toFixed(1) + '%)' : '—',
     risk_reward: rr,
-    risk_percent: riskPct + '%',
-    position_size: positionPct + '% of portfolio',
+    risk_percent: riskPct.toFixed(1) + '%',
+    position_size: Math.round(positionPct) + '% of portfolio',
     catalyst_reason: catalystReason,
     reason: '',
     // internal
@@ -3468,9 +3744,10 @@ function shortTermDecision(score, ta, price, catalystInfo) {
     _marketMatch: score.marketMatch,
     _riskRaw: score.riskRaw,
     _catalystHeat: score.catalystHeat,
+    _regimeFit: regimeFit,
     _stopRaw: stopLoss,
     _tpRaw: takeProfit,
-    _positionPct: positionPct,
+    _positionPct: Math.round(positionPct),
   };
 }
 
@@ -3494,13 +3771,31 @@ const TradeRiskCtrl = {
   MAX_CONSECUTIVE_LOSS: 3,
   MAX_DRAWDOWN_PCT: 10, // max portfolio drawdown before full stop
 
-  canTrade() {
+  // ── Active Trade List: only these tickers can be traded today ──
+  _tradeList: [], // populated by dashboard scan
+  setTradeList(picks) {
+    this._tradeList = (picks || []).filter(p => p.decision && p.decision.decision === 'Buy').map(p => p.ticker);
+  },
+  isOnTradeList(ticker) {
+    if (!this._tradeList.length) return true; // if no scan done yet, allow
+    return this._tradeList.includes(ticker);
+  },
+
+  canTrade(ticker) {
     const d = this._get();
     if (d.trades >= this.MAX_DAILY_TRADES) return { ok: false, reason: '已達今日最大交易次數 (' + this.MAX_DAILY_TRADES + ')' };
     if (d.consLoss >= this.MAX_CONSECUTIVE_LOSS) return { ok: false, reason: '連續虧損 ' + this.MAX_CONSECUTIVE_LOSS + ' 次，今日停止交易' };
-    // Check max drawdown from journal
     const dd = this._calcDrawdown();
     if (dd >= this.MAX_DRAWDOWN_PCT) return { ok: false, reason: '累計回撤達 ' + dd.toFixed(1) + '%，超過上限 ' + this.MAX_DRAWDOWN_PCT + '%，暫停交易' };
+    // Regime enforcement
+    const regime = _currentRegime || MarketRegime._default();
+    if (regime.regime === 'Bear' && regime.confidence >= 60) {
+      return { ok: false, reason: '🐻 空頭市場（信心 ' + regime.confidence + '%），系統禁止做多交易' };
+    }
+    // Trade list enforcement
+    if (ticker && !this.isOnTradeList(ticker)) {
+      return { ok: false, reason: '⛔ ' + ticker + ' 不在今日交易清單中，禁止交易' };
+    }
     return { ok: true, reason: '' };
   },
   recordTrade(won) {
@@ -3582,7 +3877,14 @@ function generateClaudePrompt(picks) {
   R:R: ${p.decision.risk_reward || '—'} | 建議倉位: ${p.decision.position_size || '—'} | 單筆風險: ${p.decision.risk_percent}`;
   }).join('\n\n');
 
+  const regime = _currentRegime || MarketRegime._default();
+  const regimeStr = `Regime: ${regime.regime} (信心 ${regime.confidence}%, 趨勢 ${regime.trend_strength}, 波動 ${regime.volatility}, VIX ${(regime._vix||0).toFixed(1)})`;
+
   return `你是一位專業短線交易員。根據以下候選股票的量化分析結果，為每檔股票做出最終交易決策。
+
+## 當前市場狀態
+${regimeStr}
+${regime.regime === 'Bear' ? '⚠️ 空頭市場：僅允許防守策略（回檔反彈、均值回歸），禁止追漲做多。' : regime.regime === 'Sideways' ? '⚠️ 震盪市場：精選操作，禁止追漲，僅允許有題材且技術面確認的股票。' : '📈 多頭市場：可順勢做多，Momentum 和 Catalyst 策略優先。'}
 
 ## 市場掃描結果 (${new Date().toLocaleDateString('zh-TW')})
 
@@ -3631,6 +3933,12 @@ async function runFullScan() {
   renderRiskBanner(rc);
 
   try {
+    // Phase 0: Detect Market Regime FIRST
+    status.textContent = '🌐 偵測市場狀態 (Regime)...';
+    _currentRegime = await MarketRegime.detect();
+    const regime = _currentRegime;
+    const allowedStrats = MarketRegime.getAllowedStrategies(regime.regime);
+
     // Phase 1: Fetch heatmap data for catalyst detection
     status.textContent = '📡 抓取市場報價...';
     const mkt = _scanMarket;
@@ -3675,10 +3983,11 @@ async function runFullScan() {
 
     // Phase 3: Filter — ONLY stocks with catalyst
     const withCatalyst = stocks.filter(s => tickerCatalyst[s.t]);
-    status.textContent = '📊 策略匹配 ' + withCatalyst.length + ' 檔有題材股...';
+    status.textContent = '📊 策略匹配 ' + withCatalyst.length + ' 檔有題材股 (' + regime.regime + ' regime)...';
 
-    // Phase 4: Run technical analysis + strategy matching on filtered stocks
+    // Phase 4: Run technical analysis + REGIME-GATED strategy matching
     const picks = [];
+    const stratConf = LearningEngine.getStrategyConf();
     for (let i = 0; i < withCatalyst.length; i += 6) {
       const batch = withCatalyst.slice(i, i + 6);
       status.textContent = '📊 分析 ' + Math.min(i + 6, withCatalyst.length) + '/' + withCatalyst.length + '...';
@@ -3697,19 +4006,23 @@ async function runFullScan() {
           const price = chart.meta.regularMarketPrice;
           const ta = technicalAnalysis(closes, highs, lows, vols, price);
 
-          // Try all 3 strategies, pick best match
-          let bestStrat = null, bestResult = null;
+          // Try all strategies — but check REGIME GATE
+          let bestStrat = null, bestResult = null, isRegimeFit = false;
           for (const [key, strat] of Object.entries(STRATEGIES)) {
             const result = strat.check(ta, price, closes);
-            if (result.match && (!bestResult || result.score > bestResult.score)) {
+            // Apply learning confidence
+            const adjScore = Math.round(result.score * (stratConf[key] || 1));
+            const stratAllowed = allowedStrats[key] !== false;
+            if (result.match && (!bestResult || adjScore > bestResult.score)) {
               bestStrat = key;
-              bestResult = result;
+              bestResult = { ...result, score: adjScore };
+              isRegimeFit = stratAllowed;
             }
           }
           if (!bestResult) return; // No strategy matched → skip
 
           const cat = tickerCatalyst[s.t];
-          const scoreObj = shortTermScore(ta, bestResult, cat.heat);
+          const scoreObj = shortTermScore(ta, bestResult, cat.heat, isRegimeFit);
           const dec = shortTermDecision(scoreObj, ta, price, cat);
           dec.reason = bestResult.reason;
           const sig = classifySignal(dec, cat.heat);
@@ -3722,10 +4035,12 @@ async function runFullScan() {
             chgPct: results[s.t]?.chgPct || 0,
             strategy: STRATEGIES[bestStrat].name,
             strategyIcon: STRATEGIES[bestStrat].icon,
+            strategyKey: bestStrat,
             strategyReason: bestResult.reason,
             decision: dec,
             catalyst: cat,
             signalType: sig,
+            regimeFit: isRegimeFit,
             ta: { rsi: ta.rsi, macd: ta.hist, volRatio: ta.volRatio, score: ta.score },
           });
         } catch { /* skip failed stocks */ }
@@ -3733,9 +4048,10 @@ async function runFullScan() {
       if (i + 6 < withCatalyst.length) await delay(100);
     }
 
-    // Phase 5: Sort by score, apply catalyst boost, take top 10
+    // Phase 5: Sort — regime-fit stocks first, then by score + catalyst boost
     picks.sort((a, b) => {
-      // Catalyst heat as tiebreaker/boost
+      // Regime-fit stocks always rank higher
+      if (a.regimeFit !== b.regimeFit) return a.regimeFit ? -1 : 1;
       const aBoost = a.catalyst.heat >= 60 ? 5 : 0;
       const bBoost = b.catalyst.heat >= 60 ? 5 : 0;
       return (b.decision.score + bBoost) - (a.decision.score + aBoost);
@@ -3744,7 +4060,10 @@ async function runFullScan() {
     const top10 = filterSignals(picks.slice(0, 10));
     _scanResults[mkt] = top10;
 
-    status.textContent = '✅ 掃描完成 — ' + picks.length + ' 檔匹配，顯示 Top ' + top10.length;
+    // Set trade list in risk control
+    TradeRiskCtrl.setTradeList(top10);
+
+    status.textContent = '✅ ' + regime.regime + ' | ' + picks.length + ' 檔匹配，Top ' + top10.length + ' | 信心 ' + regime.confidence + '%';
     renderScanResults(mkt);
 
   } catch (e) {
@@ -3788,20 +4107,27 @@ function renderScanResults(mkt) {
     return;
   }
 
-  let html = '';
+  // Show regime badge at top of scanner results
+  const regime = _currentRegime;
+  let html = regime ? MarketRegime.renderBadge(regime) : '';
+
   picks.forEach((p, idx) => {
     const d = p.decision;
     const cls = d.decision === 'Buy' ? 'buy' : d.decision === 'Wait' ? 'wait' : 'avoid';
     const decColor = d.decision === 'Buy' ? 'var(--green)' : d.decision === 'Wait' ? 'var(--yellow)' : 'var(--red)';
     const decBg = d.decision === 'Buy' ? 'rgba(16,185,129,.15)' : d.decision === 'Wait' ? 'rgba(245,158,11,.15)' : 'rgba(239,68,68,.15)';
     const sigClass = p.signalType === 'strong' ? ' signal-strong' : '';
+    const rfBadge = p.regimeFit !== false
+      ? '<span class="badge badge-green" style="font-size:10px">✓ Regime</span>'
+      : '<span class="badge badge-red" style="font-size:10px">✗ Regime</span>';
 
     html += '<div class="card pick-card ' + cls + sigClass + '" onclick="document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">' +
       '<div class="pick-row">' +
         '<div>' +
-          '<div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
             '<span class="pick-ticker">' + p.ticker + '</span>' +
             '<span class="strat-tag">' + p.strategyIcon + ' ' + p.strategy + '</span>' +
+            rfBadge +
             (p.signalType === 'strong' ? '<span style="font-size:11px;color:var(--green);font-weight:700">⚡ 強訊號</span>' : '') +
           '</div>' +
           '<div class="pick-name">' + p.name + ' · ' + p.sector + '</div>' +
@@ -3809,6 +4135,7 @@ function renderScanResults(mkt) {
         '<div style="text-align:right">' +
           '<div class="pick-score" style="color:' + decColor + '">' + d.score + '</div>' +
           '<div class="pick-badge" style="background:' + decBg + ';color:' + decColor + '">' + d.decision + '</div>' +
+          '<div style="font-size:10px;color:var(--muted)">信心 ' + d.confidence + '%</div>' +
         '</div>' +
       '</div>' +
       '<div class="pick-meta">' +
@@ -3819,13 +4146,14 @@ function renderScanResults(mkt) {
         '<div>停利 <b style="color:var(--green)">' + (d.take_profit || '—') + '</b></div>' +
         '<div>R:R <b>' + (d.risk_reward || '—') + '</b></div>' +
         '<div>倉位 <b>' + (d.position_size || '—') + '</b></div>' +
+        '<div>風險 <b>' + (d.risk_percent || '—') + '</b></div>' +
       '</div>' +
       '<div class="pick-detail">' +
         '<div style="color:var(--accent)">📊 ' + p.strategyReason + '</div>' +
         '<div>🔥 ' + d.catalyst_reason + '</div>' +
-        '<div style="color:var(--muted)">RSI ' + p.ta.rsi.toFixed(1) + ' · MACD柱 ' + (p.ta.macd > 0 ? '+' : '') + p.ta.macd.toFixed(3) + ' · 量比 ' + p.ta.volRatio.toFixed(1) + 'x</div>' +
+        '<div style="color:var(--muted)">RSI ' + p.ta.rsi.toFixed(1) + ' · MACD柱 ' + (p.ta.macd > 0 ? '+' : '') + p.ta.macd.toFixed(3) + ' · 量比 ' + p.ta.volRatio.toFixed(1) + 'x · Regime ' + (d.regime || 'N/A') + '</div>' +
       '</div>' +
-      (d.decision === 'Buy' ? '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d.stop_loss ? d.stop_loss.replace(/[^0-9.]/g,'') : p.price * 0.95) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">🔍 詳細分析</button></div>' : '') +
+      (d.decision === 'Buy' ? '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d._stopRaw || p.price * 0.95).toFixed(2) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">🔍 詳細分析</button></div>' : '') +
     '</div>';
   });
 
@@ -3977,22 +4305,27 @@ const LearningEngine = {
 
     // Base adjustment: if win rate is good (>55%), weights are fine; if bad, shift toward risk
     let w = store.weights || { ...DEFAULT_SCORE_WEIGHTS };
+    if (!w.regime) w.regime = 0.10;
     if (winRate < 0.40) {
-      // Losing too much → increase risk weight, decrease market
+      // Losing too much → increase risk + regime weight, decrease market
       w.risk = Math.min(0.35, w.risk + 0.02);
-      w.market = Math.max(0.15, w.market - 0.02);
+      w.regime = Math.min(0.20, w.regime + 0.01);
+      w.market = Math.max(0.10, w.market - 0.02);
+      w.tech = Math.max(0.20, w.tech - 0.01);
     } else if (winRate > 0.60) {
       // Winning well → can slightly increase tech/catalyst for more opportunities
-      w.tech = Math.min(0.50, w.tech + 0.01);
+      w.tech = Math.min(0.45, w.tech + 0.01);
       w.catalyst = Math.min(0.20, w.catalyst + 0.01);
-      w.risk = Math.max(0.10, w.risk - 0.02);
+      w.risk = Math.max(0.10, w.risk - 0.01);
+      w.regime = Math.max(0.05, w.regime - 0.01);
     }
-    // Normalize to sum = 1.0
-    const wSum = w.tech + w.market + w.risk + w.catalyst;
+    // Normalize to sum = 1.0 (5 weights now)
+    const wSum = w.tech + w.market + w.risk + w.catalyst + w.regime;
     w.tech = Math.round(w.tech / wSum * 100) / 100;
     w.market = Math.round(w.market / wSum * 100) / 100;
     w.risk = Math.round(w.risk / wSum * 100) / 100;
-    w.catalyst = Math.round((1 - w.tech - w.market - w.risk) * 100) / 100;
+    w.catalyst = Math.round(w.catalyst / wSum * 100) / 100;
+    w.regime = Math.round((1 - w.tech - w.market - w.risk - w.catalyst) * 100) / 100;
 
     // ── B. Adjust strategy confidence based on per-strategy win rate ──
     const stratConf = store.stratConf || { momentum: 1, catalyst: 1, pullback: 1, gapgo: 1, meanrev: 1 };
@@ -4335,7 +4668,7 @@ function runLearning() {
       return '<span style="color:' + color + '">' + k + ': ' + v.toFixed(2) + '</span>';
     }).join(' · ');
     el.innerHTML = '<div style="color:var(--green);font-size:13px;margin-bottom:6px">✅ ' + result.msg + ' (勝率: ' + result.winRate + ')</div>' +
-      '<div style="font-size:12px">新權重: Tech ' + (w.tech * 100).toFixed(0) + '% · Market ' + (w.market * 100).toFixed(0) + '% · Risk ' + (w.risk * 100).toFixed(0) + '% · Catalyst ' + (w.catalyst * 100).toFixed(0) + '%</div>' +
+      '<div style="font-size:12px">新權重: Tech ' + (w.tech * 100).toFixed(0) + '% · Market ' + (w.market * 100).toFixed(0) + '% · Risk ' + (w.risk * 100).toFixed(0) + '% · Catalyst ' + (w.catalyst * 100).toFixed(0) + '% · Regime ' + ((w.regime || 0.10) * 100).toFixed(0) + '%</div>' +
       '<div style="font-size:12px;margin-top:4px">策略信心: ' + confHtml + '</div>';
   }
 }
@@ -4409,6 +4742,7 @@ function renderReview() {
             '<div>Market: <b>' + (wt.market * 100).toFixed(0) + '%</b></div>' +
             '<div>Risk: <b>' + (wt.risk * 100).toFixed(0) + '%</b></div>' +
             '<div>Catalyst: <b>' + (wt.catalyst * 100).toFixed(0) + '%</b></div>' +
+            '<div>Regime: <b>' + ((wt.regime || 0.10) * 100).toFixed(0) + '%</b></div>' +
             '<div style="color:var(--muted)">上次優化: ' + ls.lastOptimized + '</div>' +
           '</div>';
         })() +
@@ -4516,6 +4850,25 @@ function drawEquityCurve(curve) {
 // ============ EXECUTION FLOW (Scanner → Journal) ============
 
 function executeTrade(ticker, price, stopLoss, strategy, catalyst) {
+  // ── ENFORCED CHECKS (UI + Logic double-block) ──
+  const canResult = TradeRiskCtrl.canTrade(ticker);
+  if (!canResult.ok) {
+    alert('⛔ 交易被阻止\n\n' + canResult.reason);
+    return;
+  }
+  // Regime check
+  const regime = _currentRegime || MarketRegime._default();
+  if (regime.regime === 'Bear' && regime.confidence >= 60) {
+    alert('🐻 空頭市場（信心 ' + regime.confidence + '%），系統禁止做多交易。\n請等待市場狀態改善。');
+    return;
+  }
+
+  // Calculate position size based on risk budget
+  const riskMul = MarketRegime.getRiskMultiplier(regime.regime);
+  const maxRisk = TradeRiskCtrl.MAX_RISK_PER_TRADE * riskMul;
+  const riskPerShare = Math.abs(price - stopLoss);
+  const riskPctPerShare = (riskPerShare / price) * 100;
+
   // Pre-fill journal form and switch to journal page
   showPage('journal');
   document.getElementById('j-date').valueAsDate = new Date();
@@ -4523,15 +4876,22 @@ function executeTrade(ticker, price, stopLoss, strategy, catalyst) {
   document.getElementById('j-action').value = 'buy';
   document.getElementById('j-price').value = price.toFixed(2);
   document.getElementById('j-qty').focus();
-  document.getElementById('j-notes').value = '策略: ' + strategy + ' | 停損: $' + stopLoss + ' | 題材: ' + catalyst;
+  document.getElementById('j-notes').value =
+    '策略: ' + strategy +
+    ' | 停損: $' + stopLoss +
+    ' | 題材: ' + catalyst +
+    ' | Regime: ' + regime.regime +
+    ' | 風險: ' + maxRisk.toFixed(1) + '% (預算 ' + (riskMul * 100).toFixed(0) + '%)' +
+    ' | 每股風險: $' + riskPerShare.toFixed(2) + ' (' + riskPctPerShare.toFixed(1) + '%)';
 
   // Update strategy dropdown if matching
-  const stratMap = { '動能突破': 'swing', '題材帶動': 'swing', '回檔反彈': 'swing' };
+  const stratMap = { '動能突破': 'momentum', '題材帶動': 'catalyst', '回檔反彈': 'pullback', '跳空追擊': 'gapgo', '均值回歸': 'meanrev' };
   const sel = document.getElementById('j-strategy');
-  if (stratMap[strategy]) sel.value = stratMap[strategy];
-
-  // Record in risk control
-  // (Don't record yet — wait for actual journal save)
+  const mappedVal = stratMap[strategy];
+  if (mappedVal) {
+    // Check if option exists
+    for (const opt of sel.options) { if (opt.value === mappedVal) { sel.value = mappedVal; break; } }
+  }
 }
 
 function prefillSell(ticker, qty) {
@@ -4555,44 +4915,65 @@ const DashCache = {
     } catch { return null; }
   },
   save(picks, catalysts) {
+    const regime = _currentRegime || MarketRegime._default();
     localStorage.setItem(this.KEY, JSON.stringify({
       date: new Date().toISOString().slice(0, 10),
       time: new Date().toLocaleTimeString('zh-TW'),
-      picks, catalysts,
+      picks, catalysts, regime,
     }));
   }
 };
 
 function loadDashboard() {
+  // Show regime status at the very top
+  const regime = _currentRegime || MarketRegime.getCached();
+  const regimeEl = document.getElementById('dash-regime');
+  if (regimeEl) {
+    if (regime) {
+      regimeEl.innerHTML = MarketRegime.renderBadge(regime);
+    } else {
+      regimeEl.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);font-size:13px">⏳ 點擊「掃描市場」偵測 Market Regime</div>';
+    }
+  }
+
   // Show risk status
   const rc = TradeRiskCtrl.getStatus();
   const riskEl = document.getElementById('dash-risk-status');
   if (rc.locked) {
     riskEl.innerHTML = '<div class="card verdict-card" style="border-left-color:var(--red)"><div class="verdict-title" style="color:var(--red)">🔒 交易鎖定</div><div class="verdict-body">' + rc.lockReason + '</div></div>';
   } else {
+    const riskMul = regime ? MarketRegime.getRiskMultiplier(regime.regime) : 1;
     riskEl.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">' +
       '<span>剩餘交易: <b style="color:var(--green)">' + rc.tradesLeft + '</b>/' + TradeRiskCtrl.MAX_DAILY_TRADES + '</span>' +
-      '<span>單筆風險: <b>' + TradeRiskCtrl.MAX_RISK_PER_TRADE + '%</b></span>' +
+      '<span>單筆風險: <b>' + (TradeRiskCtrl.MAX_RISK_PER_TRADE * riskMul).toFixed(1) + '%</b></span>' +
       '<span>連虧: <b>' + rc.consLoss + '</b>/' + TradeRiskCtrl.MAX_CONSECUTIVE_LOSS + '</span>' +
       '<span>回撤: <b style="color:' + (rc.drawdownPct > 5 ? 'var(--red)' : 'var(--muted)') + '">' + rc.drawdownPct.toFixed(1) + '%</b>/' + TradeRiskCtrl.MAX_DRAWDOWN_PCT + '%</span>' +
+      '<span>風險預算: <b>' + (riskMul * 100).toFixed(0) + '%</b></span>' +
     '</div>';
   }
 
   // Try loading cached scan from today
   const cache = DashCache.get();
   if (cache && cache.picks && cache.picks.length) {
-    document.getElementById('dash-time').textContent = '上次掃描: ' + cache.time;
+    document.getElementById('dash-time').textContent = (cache.regime ? cache.regime.regime + ' | ' : '') + '上次掃描: ' + cache.time;
+    // Restore regime from cache if not already set
+    if (cache.regime && !_currentRegime) {
+      _currentRegime = cache.regime;
+      if (regimeEl) regimeEl.innerHTML = MarketRegime.renderBadge(cache.regime);
+    }
     renderDashTradeList(cache.picks, cache.catalysts || []);
+    // Restore trade list in risk control
+    TradeRiskCtrl.setTradeList(cache.picks);
   }
 
-  // Show quick market summary (learning status)
+  // Show system status (learning + regime)
   const ls = LearningEngine.getSummary();
   const msEl = document.getElementById('dash-market-summary');
   const w = ls.weights;
   msEl.innerHTML = '<div class="card" style="font-size:12px">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
       '<div><b>⚙️ 系統狀態</b></div>' +
-      '<div style="color:var(--muted)">權重: T' + (w.tech*100).toFixed(0) + ' M' + (w.market*100).toFixed(0) + ' R' + (w.risk*100).toFixed(0) + ' C' + (w.catalyst*100).toFixed(0) + ' · 上次優化: ' + ls.lastOptimized + '</div>' +
+      '<div style="color:var(--muted)">權重: T' + (w.tech*100).toFixed(0) + ' M' + (w.market*100).toFixed(0) + ' R' + (w.risk*100).toFixed(0) + ' C' + (w.catalyst*100).toFixed(0) + (w.regime ? ' Rg' + (w.regime*100).toFixed(0) : '') + ' · 上次優化: ' + ls.lastOptimized + '</div>' +
     '</div></div>';
 }
 
@@ -4608,7 +4989,17 @@ async function runDashboardScan() {
   const tickers = stocks.map(s => s.t);
 
   try {
-    listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p style="margin-top:12px;font-size:13px">Phase 1/4：抓取市場報價...</p></div>';
+    // Phase 0: Detect Market Regime FIRST
+    listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p style="margin-top:12px;font-size:13px">Phase 0/5：偵測市場狀態 (Regime)...</p></div>';
+    _currentRegime = await MarketRegime.detect();
+    const regime = _currentRegime;
+    const allowedStrats = MarketRegime.getAllowedStrategies(regime.regime);
+
+    // Update regime display
+    const regimeEl = document.getElementById('dash-regime');
+    if (regimeEl) regimeEl.innerHTML = MarketRegime.renderBadge(regime);
+
+    listEl.querySelector('p').textContent = 'Phase 1/5：抓取市場報價...';
     await fetchHistCloses(tickers);
     const results = {};
     for (let i = 0; i < tickers.length; i += 12) {
@@ -4625,7 +5016,7 @@ async function runDashboardScan() {
       if (i + 12 < tickers.length) await delay(80);
     }
 
-    listEl.querySelector('p').textContent = 'Phase 2/4：偵測題材...';
+    listEl.querySelector('p').textContent = 'Phase 2/5：偵測題材...';
     const catalysts = detectCatalysts(results, mkt);
 
     const tickerCatalyst = {};
@@ -4640,7 +5031,7 @@ async function runDashboardScan() {
     }
 
     const withCatalyst = stocks.filter(s => tickerCatalyst[s.t]);
-    listEl.querySelector('p').textContent = 'Phase 3/4：策略匹配 ' + withCatalyst.length + ' 檔...';
+    listEl.querySelector('p').textContent = 'Phase 3/5：策略匹配 ' + withCatalyst.length + ' 檔 (' + regime.regime + ')...';
 
     const picks = [];
     const stratConf = LearningEngine.getStrategyConf();
@@ -4658,20 +5049,22 @@ async function runDashboardScan() {
           const price = chart.meta.regularMarketPrice;
           const ta = technicalAnalysis(closes, highs, lows, vols, price);
 
-          let bestStrat = null, bestResult = null;
+          // Regime-gated strategy matching
+          let bestStrat = null, bestResult = null, isRegimeFit = false;
           for (const [key, strat] of Object.entries(STRATEGIES)) {
             const result = strat.check(ta, price, closes);
-            // Apply learning confidence
             const adjScore = Math.round(result.score * (stratConf[key] || 1));
+            const stratAllowed = allowedStrats[key] !== false;
             if (result.match && (!bestResult || adjScore > bestResult.score)) {
               bestStrat = key;
               bestResult = { ...result, score: adjScore };
+              isRegimeFit = stratAllowed;
             }
           }
           if (!bestResult) return;
 
           const cat = tickerCatalyst[s.t];
-          const scoreObj = shortTermScore(ta, bestResult, cat.heat);
+          const scoreObj = shortTermScore(ta, bestResult, cat.heat, isRegimeFit);
           const dec = shortTermDecision(scoreObj, ta, price, cat);
           dec.reason = bestResult.reason;
           const sig = classifySignal(dec, cat.heat);
@@ -4684,6 +5077,7 @@ async function runDashboardScan() {
             strategyKey: bestStrat,
             strategyReason: bestResult.reason,
             decision: dec, catalyst: cat, signalType: sig,
+            regimeFit: isRegimeFit,
             ta: { rsi: ta.rsi, macd: ta.hist, volRatio: ta.volRatio, score: ta.score },
           });
         } catch { /* skip */ }
@@ -4691,7 +5085,9 @@ async function runDashboardScan() {
       if (i + 6 < withCatalyst.length) await delay(100);
     }
 
+    // Sort: regime-fit first, then by score + catalyst boost
     picks.sort((a, b) => {
+      if (a.regimeFit !== b.regimeFit) return a.regimeFit ? -1 : 1;
       const aBoost = a.catalyst.heat >= 60 ? 5 : 0;
       const bBoost = b.catalyst.heat >= 60 ? 5 : 0;
       return (b.decision.score + bBoost) - (a.decision.score + aBoost);
@@ -4703,7 +5099,13 @@ async function runDashboardScan() {
     _scanCatalysts[mkt] = catalysts;
     DashCache.save(top, catalysts);
 
-    document.getElementById('dash-time').textContent = '掃描於 ' + new Date().toLocaleTimeString('zh-TW');
+    // Set trade list for enforcement
+    TradeRiskCtrl.setTradeList(top);
+
+    // Refresh risk status (now regime-aware)
+    loadDashboard();
+
+    document.getElementById('dash-time').textContent = regime.regime + ' | 掃描於 ' + new Date().toLocaleTimeString('zh-TW');
     renderDashTradeList(top, catalysts);
 
   } catch(e) {
@@ -4735,7 +5137,7 @@ function renderDashTradeList(picks, catalysts) {
     html += '</div>';
   }
 
-  // Trade list — compact, decision-focused
+  // Trade list — compact, decision-focused, regime-aware
   picks.forEach((p, i) => {
     const d = p.decision;
     const decColor = d.decision === 'Buy' ? 'var(--green)' : d.decision === 'Wait' ? 'var(--yellow)' : 'var(--red)';
@@ -4743,16 +5145,24 @@ function renderDashTradeList(picks, catalysts) {
     const confColor = d.confidence >= 70 ? 'var(--green)' : d.confidence >= 40 ? 'var(--yellow)' : 'var(--red)';
     const isBuy = d.decision === 'Buy';
     const sigClass = p.signalType === 'strong' ? ' signal-strong' : '';
+    const rfOk = p.regimeFit !== false;
+    const rfBadge = rfOk
+      ? '<span class="badge badge-green" style="font-size:10px">✓Regime</span>'
+      : '<span class="badge badge-red" style="font-size:10px">✗Regime</span>';
+    // Primary (rank 1) vs Secondary (rank 2-3) designation
+    const rankLabel = i === 0 ? '<span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:var(--accent);color:#fff">PRIMARY</span>' : i < 3 ? '<span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:600;background:rgba(59,130,246,.15);color:var(--accent)">SECONDARY</span>' : '';
 
     html += '<div class="card' + sigClass + '" style="border-left:4px solid ' + decColor + ';padding:16px;cursor:pointer" onclick="document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">';
 
-    // Row 1: Ticker + Decision + Score
+    // Row 1: Ticker + Decision + Score + Regime
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
     html += '<span style="font-size:11px;color:var(--muted)">#' + (i+1) + '</span>';
+    html += rankLabel;
     html += '<span style="font-size:18px;font-weight:800">' + p.ticker + '</span>';
     html += '<span style="font-size:13px;color:var(--muted)">' + p.name + '</span>';
     html += '<span style="padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:' + decBg + ';color:' + decColor + '">' + d.decision + '</span>';
+    html += rfBadge;
     if (p.signalType === 'strong') html += '<span style="font-size:11px;color:var(--green);font-weight:700">⚡強訊號</span>';
     html += '</div>';
     html += '<div style="text-align:right"><div style="font-size:24px;font-weight:800;color:' + decColor + '">' + d.score + '</div><div style="font-size:10px;color:' + confColor + '">信心 ' + d.confidence + '%</div></div>';
@@ -4767,16 +5177,20 @@ function renderDashTradeList(picks, catalysts) {
     html += '<span style="color:var(--green)">停利 ' + (d.take_profit || '—') + '</span>';
     html += '<span>R:R ' + (d.risk_reward || '—') + '</span>';
     html += '<span>倉位 ' + (d.position_size || '—') + '</span>';
+    html += '<span>風險 ' + (d.risk_percent || '—') + '</span>';
     html += '</div>';
 
     // Row 3: Reasons
     html += '<div style="font-size:12px;color:var(--muted)">';
-    html += '<span style="color:var(--accent)">' + p.strategyReason + '</span> · ' + d.catalyst_reason;
+    html += '<span style="color:var(--accent)">' + (p.strategyReason || '') + '</span> · ' + d.catalyst_reason;
+    if (!rfOk) html += ' · <span style="color:var(--red)">策略不符合當前 Regime</span>';
     html += '</div>';
 
-    // Execute button for Buy
-    if (isBuy && !rc.locked) {
+    // Execute button — ONLY for Buy + regime-fit + not locked
+    if (isBuy && rfOk && !rc.locked) {
       html += '<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d._stopRaw || p.price * 0.95).toFixed(2) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button></div>';
+    } else if (isBuy && !rfOk) {
+      html += '<div style="margin-top:8px;font-size:11px;color:var(--red)">⛔ Regime 不允許此策略，禁止執行</div>';
     }
 
     html += '</div>';
