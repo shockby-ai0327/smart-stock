@@ -3252,7 +3252,7 @@ function detectCatalysts(heatmapResults, market) {
   return themes.slice(0, 5);
 }
 
-// ============ ② STRATEGY ENGINE — 3 Short-Term Strategies ============
+// ============ ② STRATEGY ENGINE — 5 Short-Term Strategies ============
 
 const STRATEGIES = {
   // Strategy 1: Momentum Breakout — 動能突破
@@ -3310,64 +3310,123 @@ const STRATEGIES = {
       };
     }
   },
+  // Strategy 4: Gap & Go — 跳空追擊
+  gapgo: {
+    name: '跳空追擊',
+    icon: '⚡',
+    check(ta, price, closes) {
+      if (closes.length < 3) return { match: false, score: 0, reason: '數據不足' };
+      const prevClose = closes[closes.length - 2];
+      const gapPct = ((price - prevClose) / prevClose) * 100;
+      const gapUp = gapPct > 1.5; // gap up > 1.5%
+      const volOk = ta.volRatio >= 1.5;
+      const rsiMid = ta.rsi >= 50 && ta.rsi <= 80;
+      const aboveMA5 = price > ta.ma5;
+      const holdingGap = price > prevClose; // not filling gap
+      const score = (gapUp ? 30 : 0) + (volOk ? 25 : 0) + (rsiMid ? 15 : 0) + (aboveMA5 ? 15 : 0) + (holdingGap ? 15 : 0);
+      return {
+        match: score >= 70,
+        score,
+        reason: (gapUp ? '跳空+' + gapPct.toFixed(1) + '%' : '無跳空') + (volOk ? ' + 大量' : '') + (holdingGap ? ' + 未回補缺口' : ' + 缺口回補中'),
+      };
+    }
+  },
+  // Strategy 5: Mean Reversion — 均值回歸
+  meanrev: {
+    name: '均值回歸',
+    icon: '🎯',
+    check(ta, price, closes) {
+      // Price > 2 std devs below MA20, RSI oversold but turning up
+      const distFromMA20 = ta.ma20 ? ((price - ta.ma20) / ta.ma20 * 100) : 0;
+      const farBelow = distFromMA20 < -4; // > 4% below MA20
+      const rsiLow = ta.rsi < 30;
+      const rsiTurning = ta.rsi > 25; // not in free-fall (>25 means some recovery)
+      const kdGoldenCross = ta.kd.k > ta.kd.d && ta.kd.k < 30; // KD golden cross in oversold zone
+      const bbLow = ta.bb.lo != null && price < ta.bb.lo * 1.01;
+      const score = (farBelow ? 30 : 0) + (rsiLow ? 20 : 0) + (rsiTurning ? 10 : 0) + (kdGoldenCross ? 25 : 0) + (bbLow ? 15 : 0);
+      return {
+        match: score >= 60,
+        score,
+        reason: (farBelow ? '偏離MA20達' + Math.abs(distFromMA20).toFixed(1) + '%' : '距MA20正常') + (rsiLow ? ' + RSI超賣' : '') + (kdGoldenCross ? ' + KD低檔金叉' : '') + (bbLow ? ' + 觸布林下軌' : ''),
+      };
+    }
+  },
 };
 
 // ============ ④ SCORING MODEL (Short-term 0-100) ============
+// Weights: Technical 40% + Market 25% + Risk 20% + Catalyst 15%
+// Learning system can adjust these via LearningEngine.getWeights()
+
+const DEFAULT_SCORE_WEIGHTS = { tech: 0.40, market: 0.25, risk: 0.20, catalyst: 0.15 };
 
 function shortTermScore(ta, stratResult, catalystHeat) {
-  // Technical 50%: convert ta.score [-100,100] → [0,100], then weight
+  const w = (typeof LearningEngine !== 'undefined' && LearningEngine.getWeights) ? LearningEngine.getWeights() : DEFAULT_SCORE_WEIGHTS;
+
+  // Technical: convert ta.score [-100,100] → [0,100]
   const techNorm = Math.max(0, Math.min(100, Math.round((ta.score + 100) / 2)));
-  const techPart = techNorm * 0.50;
+  const techPart = techNorm * w.tech;
 
-  // Market match 30%: strategy match score (0-100)
-  const marketPart = (stratResult.score || 0) * 0.30;
+  // Market match: strategy match score (0-100)
+  const marketPart = (stratResult.score || 0) * w.market;
 
-  // Risk 20%: inverse of volatility risk
+  // Risk: inverse of volatility
   const atrPct = ta.atr ? (ta.atr / (ta.ma20 || 1)) * 100 : 3;
   const riskRaw = atrPct > 5 ? 20 : atrPct > 3 ? 50 : atrPct > 1.5 ? 80 : 95;
-  const riskPart = riskRaw * 0.20;
+  const riskPart = riskRaw * w.risk;
 
-  let total = Math.round(techPart + marketPart + riskPart);
+  // Catalyst: heat directly as score component
+  const catNorm = Math.max(0, Math.min(100, catalystHeat || 0));
+  const catPart = catNorm * w.catalyst;
+
+  let total = Math.round(techPart + marketPart + riskPart + catPart);
   total = Math.max(0, Math.min(100, total));
 
-  return { total, techNorm, marketMatch: stratResult.score || 0, riskRaw, catalystHeat };
+  return { total, techNorm, marketMatch: stratResult.score || 0, riskRaw, catalystHeat: catNorm, weights: w };
 }
 
 // ============ ⑤ DECISION ENGINE ============
 
 function shortTermDecision(score, ta, price, catalystInfo) {
-  let decision, entryLow, entryHigh, stopLoss, riskPct;
+  let decision, entryLow, entryHigh, stopLoss, takeProfit, riskPct, positionPct;
+  const atr = ta.atr || (price * 0.02);
 
   if (score.total >= 70) {
     decision = 'Buy';
     entryLow = price * 0.99;
     entryHigh = price * 1.005;
-    stopLoss = price * (1 - ta.atr * 1.5 / price);
+    stopLoss = price - atr * 1.5;
+    takeProfit = price + atr * 3; // R:R = 1:2
     riskPct = 2;
+    positionPct = Math.min(25, Math.round(2 / ((atr * 1.5 / price) * 100) * 100)); // Kelly-lite
   } else if (score.total >= 50) {
     decision = 'Wait';
     entryLow = price * 0.97;
     entryHigh = price * 0.99;
-    stopLoss = price * (1 - ta.atr * 2 / price);
+    stopLoss = price - atr * 2;
+    takeProfit = price + atr * 3;
     riskPct = 1.5;
+    positionPct = Math.min(15, Math.round(1.5 / ((atr * 2 / price) * 100) * 100));
   } else {
     decision = 'Avoid';
-    entryLow = null;
-    entryHigh = null;
-    stopLoss = null;
-    riskPct = 0;
+    entryLow = null; entryHigh = null; stopLoss = null; takeProfit = null;
+    riskPct = 0; positionPct = 0;
   }
 
   const catalystReason = catalystInfo
     ? '題材【' + catalystInfo.theme + '】熱度 ' + catalystInfo.heat + '/100' + (catalystInfo.trend === 'up' ? ' ↑上升' : catalystInfo.trend === 'down' ? ' ↓下降' : ' →持平')
     : '無明確題材';
 
+  const rr = stopLoss && takeProfit ? ((takeProfit - price) / (price - stopLoss)).toFixed(1) : '—';
+
   return {
     score: score.total,
     decision,
     entry_range: entryLow && entryHigh ? '$' + entryLow.toFixed(2) + ' – $' + entryHigh.toFixed(2) : '—',
     stop_loss: stopLoss ? '$' + stopLoss.toFixed(2) + ' (' + (-(1 - stopLoss/price) * 100).toFixed(1) + '%)' : '—',
+    take_profit: takeProfit ? '$' + takeProfit.toFixed(2) + ' (+' + ((takeProfit/price - 1) * 100).toFixed(1) + '%)' : '—',
+    risk_reward: rr,
     risk_percent: riskPct + '%',
+    position_size: positionPct + '% of portfolio',
     catalyst_reason: catalystReason,
     reason: '',
     // internal
@@ -3375,6 +3434,9 @@ function shortTermDecision(score, ta, price, catalystInfo) {
     _marketMatch: score.marketMatch,
     _riskRaw: score.riskRaw,
     _catalystHeat: score.catalystHeat,
+    _stopRaw: stopLoss,
+    _tpRaw: takeProfit,
+    _positionPct: positionPct,
   };
 }
 
@@ -3396,11 +3458,15 @@ const TradeRiskCtrl = {
   MAX_DAILY_TRADES: 2,
   MAX_RISK_PER_TRADE: 2, // percent
   MAX_CONSECUTIVE_LOSS: 3,
+  MAX_DRAWDOWN_PCT: 10, // max portfolio drawdown before full stop
 
   canTrade() {
     const d = this._get();
     if (d.trades >= this.MAX_DAILY_TRADES) return { ok: false, reason: '已達今日最大交易次數 (' + this.MAX_DAILY_TRADES + ')' };
     if (d.consLoss >= this.MAX_CONSECUTIVE_LOSS) return { ok: false, reason: '連續虧損 ' + this.MAX_CONSECUTIVE_LOSS + ' 次，今日停止交易' };
+    // Check max drawdown from journal
+    const dd = this._calcDrawdown();
+    if (dd >= this.MAX_DRAWDOWN_PCT) return { ok: false, reason: '累計回撤達 ' + dd.toFixed(1) + '%，超過上限 ' + this.MAX_DRAWDOWN_PCT + '%，暫停交易' };
     return { ok: true, reason: '' };
   },
   recordTrade(won) {
@@ -3410,15 +3476,35 @@ const TradeRiskCtrl = {
     else d.consLoss++;
     this._save(d);
   },
+  _calcDrawdown() {
+    // Calculate max drawdown from journal trade pairs
+    try {
+      const j = JSON.parse(localStorage.getItem('stock-journal') || '[]');
+      if (!j.length) return 0;
+      const { closed } = pairTrades(j);
+      if (!closed.length) return 0;
+      let peak = 0, equity = 0, maxDD = 0;
+      for (const t of closed) {
+        equity += t.pnl;
+        if (equity > peak) peak = equity;
+        const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
+        if (dd > maxDD) maxDD = dd;
+      }
+      return maxDD;
+    } catch { return 0; }
+  },
   getStatus() {
     const d = this._get();
+    const dd = this._calcDrawdown();
+    const ddLocked = dd >= this.MAX_DRAWDOWN_PCT;
     return {
       date: d.date,
       tradesUsed: d.trades,
       tradesLeft: Math.max(0, this.MAX_DAILY_TRADES - d.trades),
       consLoss: d.consLoss,
-      locked: d.trades >= this.MAX_DAILY_TRADES || d.consLoss >= this.MAX_CONSECUTIVE_LOSS,
-      lockReason: d.trades >= this.MAX_DAILY_TRADES ? '今日交易次數已滿' : d.consLoss >= this.MAX_CONSECUTIVE_LOSS ? '連續虧損停止' : '',
+      drawdownPct: dd,
+      locked: d.trades >= this.MAX_DAILY_TRADES || d.consLoss >= this.MAX_CONSECUTIVE_LOSS || ddLocked,
+      lockReason: d.trades >= this.MAX_DAILY_TRADES ? '今日交易次數已滿' : d.consLoss >= this.MAX_CONSECUTIVE_LOSS ? '連續虧損停止' : ddLocked ? '回撤超限 ' + dd.toFixed(1) + '%' : '',
     };
   },
 };
@@ -3455,10 +3541,11 @@ function generateClaudePrompt(picks) {
   const lines = picks.filter(p => p.decision.decision === 'Buy' || p.decision.decision === 'Wait').map(p => {
     return `【${p.ticker}】${p.name}
   分數: ${p.decision.score}/100 | 決策: ${p.decision.decision}
-  技術面: ${p.decision._techNorm}/100 | 策略匹配: ${p.decision._marketMatch}/100 | 風險: ${p.decision._riskRaw}/100
+  技術面: ${p.decision._techNorm}/100 | 策略匹配: ${p.decision._marketMatch}/100 | 風險: ${p.decision._riskRaw}/100 | 題材: ${p.decision._catalystHeat}/100
   策略: ${p.strategy} | ${p.strategyReason}
   題材: ${p.decision.catalyst_reason}
-  進場區間: ${p.decision.entry_range} | 停損: ${p.decision.stop_loss} | 單筆風險: ${p.decision.risk_percent}`;
+  進場區間: ${p.decision.entry_range} | 停損: ${p.decision.stop_loss} | 停利: ${p.decision.take_profit || '—'}
+  R:R: ${p.decision.risk_reward || '—'} | 建議倉位: ${p.decision.position_size || '—'} | 單筆風險: ${p.decision.risk_percent}`;
   }).join('\n\n');
 
   return `你是一位專業短線交易員。根據以下候選股票的量化分析結果，為每檔股票做出最終交易決策。
@@ -3643,7 +3730,7 @@ function renderRiskBanner(rc) {
   if (rc.locked) {
     area.innerHTML = '<div class="risk-banner" style="background:rgba(239,68,68,.12);border:1px solid var(--red);color:var(--red)">🔒 ' + rc.lockReason + ' — 今日已交易 ' + rc.tradesUsed + '/' + TradeRiskCtrl.MAX_DAILY_TRADES + '，連續虧損 ' + rc.consLoss + '</div>';
   } else {
-    area.innerHTML = '<div class="risk-banner" style="background:rgba(16,185,129,.08);border:1px solid var(--border);color:var(--muted)">📊 今日剩餘交易: <b style="color:var(--green)">' + rc.tradesLeft + '</b> / ' + TradeRiskCtrl.MAX_DAILY_TRADES + ' · 單筆風險上限: <b>' + TradeRiskCtrl.MAX_RISK_PER_TRADE + '%</b> · 連續虧損: ' + rc.consLoss + '/' + TradeRiskCtrl.MAX_CONSECUTIVE_LOSS + '</div>';
+    area.innerHTML = '<div class="risk-banner" style="background:rgba(16,185,129,.08);border:1px solid var(--border);color:var(--muted)">📊 今日剩餘交易: <b style="color:var(--green)">' + rc.tradesLeft + '</b> / ' + TradeRiskCtrl.MAX_DAILY_TRADES + ' · 單筆風險: <b>' + TradeRiskCtrl.MAX_RISK_PER_TRADE + '%</b> · 連虧: ' + rc.consLoss + '/' + TradeRiskCtrl.MAX_CONSECUTIVE_LOSS + ' · 回撤: <b style="color:' + (rc.drawdownPct > 5 ? 'var(--red)' : 'var(--muted)') + '">' + rc.drawdownPct.toFixed(1) + '%</b>/' + TradeRiskCtrl.MAX_DRAWDOWN_PCT + '%</div>';
   }
 }
 
@@ -3695,7 +3782,9 @@ function renderScanResults(mkt) {
         '<div>漲跌 <b style="color:' + (p.chgPct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (p.chgPct >= 0 ? '+' : '') + p.chgPct.toFixed(2) + '%</b></div>' +
         '<div>進場 <b>' + d.entry_range + '</b></div>' +
         '<div>停損 <b style="color:var(--red)">' + d.stop_loss + '</b></div>' +
-        '<div>風險 <b>' + d.risk_percent + '</b></div>' +
+        '<div>停利 <b style="color:var(--green)">' + (d.take_profit || '—') + '</b></div>' +
+        '<div>R:R <b>' + (d.risk_reward || '—') + '</b></div>' +
+        '<div>倉位 <b>' + (d.position_size || '—') + '</b></div>' +
       '</div>' +
       '<div class="pick-detail">' +
         '<div style="color:var(--accent)">📊 ' + p.strategyReason + '</div>' +
@@ -3814,6 +3903,116 @@ function showPage(name) {
   if (name === 'heatmap') { if (!_hmLoaded['us'] || Date.now() - (_hmLoadedAt['us']||0) > STALE_MS) loadHeatmap('us'); }
   if (name === 'review') renderReview();
 }
+
+// ============ LEARNING SYSTEM (Self-Optimization) ============
+
+const LearningEngine = {
+  KEY: 'ss_learning',
+  _getStore() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '{}'); }
+    catch { return {}; }
+  },
+  _save(store) { localStorage.setItem(this.KEY, JSON.stringify(store)); },
+
+  // Get current scoring weights (adjusted by learning)
+  getWeights() {
+    const store = this._getStore();
+    return store.weights || { ...DEFAULT_SCORE_WEIGHTS };
+  },
+
+  // Get strategy confidence multipliers
+  getStrategyConf() {
+    const store = this._getStore();
+    return store.stratConf || { momentum: 1, catalyst: 1, pullback: 1, gapgo: 1, meanrev: 1 };
+  },
+
+  // Run learning cycle: analyze closed trades, adjust weights & strategy confidence
+  optimize() {
+    const journal = getJ();
+    const { closed } = pairTrades(journal);
+    if (closed.length < 5) return { status: 'insufficient', msg: '至少需要 5 筆已平倉交易才能優化' };
+
+    const store = this._getStore();
+
+    // ── A. Adjust scoring weights based on component correlation with wins ──
+    // For each closed trade, we stored strategy. Group by win/loss, see which component matters.
+    const wins = closed.filter(t => t.won);
+    const losses = closed.filter(t => !t.won);
+    const winRate = wins.length / closed.length;
+
+    // Base adjustment: if win rate is good (>55%), weights are fine; if bad, shift toward risk
+    let w = store.weights || { ...DEFAULT_SCORE_WEIGHTS };
+    if (winRate < 0.40) {
+      // Losing too much → increase risk weight, decrease market
+      w.risk = Math.min(0.35, w.risk + 0.02);
+      w.market = Math.max(0.15, w.market - 0.02);
+    } else if (winRate > 0.60) {
+      // Winning well → can slightly increase tech/catalyst for more opportunities
+      w.tech = Math.min(0.50, w.tech + 0.01);
+      w.catalyst = Math.min(0.20, w.catalyst + 0.01);
+      w.risk = Math.max(0.10, w.risk - 0.02);
+    }
+    // Normalize to sum = 1.0
+    const wSum = w.tech + w.market + w.risk + w.catalyst;
+    w.tech = Math.round(w.tech / wSum * 100) / 100;
+    w.market = Math.round(w.market / wSum * 100) / 100;
+    w.risk = Math.round(w.risk / wSum * 100) / 100;
+    w.catalyst = Math.round((1 - w.tech - w.market - w.risk) * 100) / 100;
+
+    // ── B. Adjust strategy confidence based on per-strategy win rate ──
+    const stratConf = store.stratConf || { momentum: 1, catalyst: 1, pullback: 1, gapgo: 1, meanrev: 1 };
+    const stratMap = { '動能突破': 'momentum', '題材帶動': 'catalyst', '回檔反彈': 'pullback', '跳空追擊': 'gapgo', '均值回歸': 'meanrev', swing: 'momentum', value: 'pullback', day: 'gapgo' };
+    const stratStats = {};
+    for (const t of closed) {
+      const key = stratMap[t.strategy] || t.strategy;
+      if (!stratStats[key]) stratStats[key] = { wins: 0, total: 0, avgPnl: 0, pnls: [] };
+      stratStats[key].total++;
+      if (t.won) stratStats[key].wins++;
+      stratStats[key].pnls.push(t.pnlPct);
+    }
+    for (const [key, s] of Object.entries(stratStats)) {
+      const wr = s.wins / s.total;
+      const avgP = s.pnls.reduce((a, b) => a + b, 0) / s.pnls.length;
+      // Confidence: boost if wr > 50% and avgPnl > 0, penalize otherwise
+      if (wr > 0.55 && avgP > 0) {
+        stratConf[key] = Math.min(1.5, (stratConf[key] || 1) + 0.1);
+      } else if (wr < 0.35 || avgP < -2) {
+        stratConf[key] = Math.max(0.3, (stratConf[key] || 1) - 0.15);
+      }
+    }
+
+    store.weights = w;
+    store.stratConf = stratConf;
+    store.lastOptimized = new Date().toISOString();
+    store.tradesAnalyzed = closed.length;
+    this._save(store);
+
+    return {
+      status: 'ok',
+      msg: '已根據 ' + closed.length + ' 筆交易優化',
+      weights: w,
+      stratConf,
+      winRate: (winRate * 100).toFixed(1) + '%',
+    };
+  },
+
+  // Reset to defaults
+  reset() {
+    localStorage.removeItem(this.KEY);
+    return { status: 'ok', msg: '已重置為預設權重' };
+  },
+
+  // Get summary for display
+  getSummary() {
+    const store = this._getStore();
+    return {
+      weights: store.weights || DEFAULT_SCORE_WEIGHTS,
+      stratConf: store.stratConf || {},
+      lastOptimized: store.lastOptimized || '未優化',
+      tradesAnalyzed: store.tradesAnalyzed || 0,
+    };
+  }
+};
 
 // ============ SIGNAL ENGINE (Structured Output) ============
 
@@ -4059,6 +4258,17 @@ function calcPerformance(closed) {
     if (cl > maxConsL) maxConsL = cl;
   }
 
+  // Simplified Sharpe ratio: mean(pnlPct) / std(pnlPct) * sqrt(252/avgHoldDays)
+  const allPcts = closed.map(t => t.pnlPct);
+  const meanPct = allPcts.reduce((a, b) => a + b, 0) / allPcts.length;
+  const variance = allPcts.reduce((s, v) => s + (v - meanPct) ** 2, 0) / allPcts.length;
+  const stdPct = Math.sqrt(variance) || 1;
+  const tradesPerYear = avgHold > 0 ? 252 / avgHold : 50;
+  const sharpe = (meanPct / stdPct) * Math.sqrt(tradesPerYear);
+
+  // Max drawdown percent (of peak equity)
+  const maxDDPct = peak > 0 ? (maxDD / peak * 100) : 0;
+
   return {
     total: closed.length,
     wins: wins.length,
@@ -4068,12 +4278,37 @@ function calcPerformance(closed) {
     avgWinPct: avgWin, avgLossPct: avgLoss,
     avgHoldDays: avgHold,
     maxDrawdown: maxDD,
+    maxDrawdownPct: maxDDPct,
     profitFactor,
+    sharpeRatio: sharpe,
     best, worst,
     maxConsWins: maxConsW, maxConsLosses: maxConsL,
     equityCurve,
     byStrategy: byStrat,
   };
+}
+
+function runLearning() {
+  const result = LearningEngine.optimize();
+  const el = document.getElementById('learning-result');
+  if (result.status === 'insufficient') {
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ ' + result.msg + '</div>';
+  } else {
+    const w = result.weights;
+    const confHtml = Object.entries(result.stratConf).map(([k, v]) => {
+      const color = v >= 1.2 ? 'var(--green)' : v <= 0.6 ? 'var(--red)' : 'var(--muted)';
+      return '<span style="color:' + color + '">' + k + ': ' + v.toFixed(2) + '</span>';
+    }).join(' · ');
+    el.innerHTML = '<div style="color:var(--green);font-size:13px;margin-bottom:6px">✅ ' + result.msg + ' (勝率: ' + result.winRate + ')</div>' +
+      '<div style="font-size:12px">新權重: Tech ' + (w.tech * 100).toFixed(0) + '% · Market ' + (w.market * 100).toFixed(0) + '% · Risk ' + (w.risk * 100).toFixed(0) + '% · Catalyst ' + (w.catalyst * 100).toFixed(0) + '%</div>' +
+      '<div style="font-size:12px;margin-top:4px">策略信心: ' + confHtml + '</div>';
+  }
+}
+
+function resetLearning() {
+  if (!confirm('確定重置 Learning System？將恢復預設權重。')) return;
+  LearningEngine.reset();
+  document.getElementById('learning-result').innerHTML = '<div style="color:var(--accent);font-size:13px">已重置為預設權重</div>';
 }
 
 function renderReview() {
@@ -4098,26 +4333,50 @@ function renderReview() {
 
   const perf = closed.length ? calcPerformance(closed) : null;
   const fmt = v => '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他', momentum: '動能突破', catalyst: '題材帶動', pullback: '回檔反彈' };
+  const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他', momentum: '動能突破', catalyst: '題材帶動', pullback: '回檔反彈', gapgo: '跳空追擊', meanrev: '均值回歸' };
 
   // ── Summary cards ──
   if (perf) {
     const wrColor = perf.winRate >= 50 ? 'var(--green)' : 'var(--red)';
     const pnlColor = perf.totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const sharpeColor = perf.sharpeRatio >= 1.5 ? 'var(--green)' : perf.sharpeRatio >= 0.5 ? 'var(--yellow)' : 'var(--red)';
+    const sharpeGrade = perf.sharpeRatio >= 2 ? '優秀' : perf.sharpeRatio >= 1 ? '良好' : perf.sharpeRatio >= 0 ? '一般' : '虧損';
     sumEl.innerHTML =
       '<div class="grid4">' +
         '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">勝率</div><div style="font-size:32px;font-weight:800;color:' + wrColor + '">' + perf.winRate.toFixed(1) + '%</div><div style="font-size:12px;color:var(--muted)">' + perf.wins + 'W / ' + perf.losses + 'L</div></div>' +
         '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">累計損益</div><div style="font-size:28px;font-weight:800;color:' + pnlColor + '">' + (perf.totalPnl >= 0 ? '+' : '') + fmt(perf.totalPnl) + '</div><div style="font-size:12px;color:var(--muted)">平均 ' + (perf.avgPnl >= 0 ? '+' : '') + fmt(perf.avgPnl) + '/筆</div></div>' +
-        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">最大回撤</div><div style="font-size:28px;font-weight:800;color:var(--red)">' + fmt(perf.maxDrawdown) + '</div><div style="font-size:12px;color:var(--muted)">Profit Factor: ' + perf.profitFactor.toFixed(2) + '</div></div>' +
-        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">平均持有</div><div style="font-size:28px;font-weight:800;color:var(--accent)">' + perf.avgHoldDays.toFixed(1) + '天</div><div style="font-size:12px;color:var(--muted)">連勝 ' + perf.maxConsWins + ' / 連敗 ' + perf.maxConsLosses + '</div></div>' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">Sharpe Ratio</div><div style="font-size:28px;font-weight:800;color:' + sharpeColor + '">' + perf.sharpeRatio.toFixed(2) + '</div><div style="font-size:12px;color:var(--muted)">' + sharpeGrade + '</div></div>' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">最大回撤</div><div style="font-size:28px;font-weight:800;color:var(--red)">' + perf.maxDrawdownPct.toFixed(1) + '%</div><div style="font-size:12px;color:var(--muted)">' + fmt(perf.maxDrawdown) + ' · PF ' + perf.profitFactor.toFixed(2) + '</div></div>' +
       '</div>' +
-      '<div class="grid2">' +
+      '<div class="grid3">' +
         '<div class="card"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">平均獲利</span><span style="color:var(--green);font-weight:700">+' + perf.avgWinPct.toFixed(2) + '%</span></div>' +
         '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">平均虧損</span><span style="color:var(--red);font-weight:700">' + perf.avgLossPct.toFixed(2) + '%</span></div>' +
         '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">盈虧比</span><span style="font-weight:700">' + (perf.avgLossPct !== 0 ? Math.abs(perf.avgWinPct / perf.avgLossPct).toFixed(2) : '∞') + '</span></div></div>' +
         '<div class="card"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">最佳交易</span><span style="color:var(--green);font-weight:700">' + perf.best.ticker + ' +' + perf.best.pnlPct.toFixed(2) + '%</span></div>' +
         '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">最差交易</span><span style="color:var(--red);font-weight:700">' + perf.worst.ticker + ' ' + perf.worst.pnlPct.toFixed(2) + '%</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">總交易次數</span><span style="font-weight:700">' + perf.total + '</span></div></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">平均持有</span><span style="font-weight:700">' + perf.avgHoldDays.toFixed(1) + '天</span></div></div>' +
+        '<div class="card"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">總交易</span><span style="font-weight:700">' + perf.total + ' 筆</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">連勝/連敗</span><span style="font-weight:700">' + perf.maxConsWins + ' / ' + perf.maxConsLosses + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">Profit Factor</span><span style="font-weight:700">' + perf.profitFactor.toFixed(2) + '</span></div></div>' +
+      '</div>' +
+      // ── Learning System Controls ──
+      '<div class="card" style="border-left:4px solid var(--accent)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+          '<div><h3 style="margin-bottom:4px">🧠 Learning System</h3><div style="font-size:12px;color:var(--muted)">根據歷史交易自動調整策略權重</div></div>' +
+          '<div style="display:flex;gap:8px"><button class="btn btn-sm btn-primary" onclick="runLearning()">執行優化</button><button class="btn btn-sm btn-ghost" onclick="resetLearning()">重置</button></div>' +
+        '</div>' +
+        '<div id="learning-result" style="margin-top:12px"></div>' +
+        (function() {
+          var ls = LearningEngine.getSummary();
+          var wt = ls.weights;
+          return '<div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:12px">' +
+            '<div>Tech: <b>' + (wt.tech * 100).toFixed(0) + '%</b></div>' +
+            '<div>Market: <b>' + (wt.market * 100).toFixed(0) + '%</b></div>' +
+            '<div>Risk: <b>' + (wt.risk * 100).toFixed(0) + '%</b></div>' +
+            '<div>Catalyst: <b>' + (wt.catalyst * 100).toFixed(0) + '%</b></div>' +
+            '<div style="color:var(--muted)">上次優化: ' + ls.lastOptimized + '</div>' +
+          '</div>';
+        })() +
       '</div>';
 
     // Equity curve
