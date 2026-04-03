@@ -242,34 +242,59 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
 <body>
 <div class="app">
   <div class="sidebar">
-    <div class="logo">📊 智慧選股</div>
+    <div class="logo">📊 操盤系統</div>
     <nav>
-      <button class="active" onclick="showPage('stock')">📈 個股分析</button>
-      <button onclick="showPage('indices')">🏛️ 大盤指數</button>
-      <button onclick="showPage('sentiment')">🧠 市場情緒</button>
-      <button onclick="showPage('news')">📰 國際新聞</button>
-      <button onclick="showPage('journal')">📝 交易日誌</button>
-      <button onclick="showPage('calc')">🧮 試算器</button>
-      <button onclick="showPage('industry')">🏭 產業地圖</button>
+      <button class="active" onclick="showPage('dashboard')">🎯 今日交易</button>
+      <button onclick="showPage('indices')">🏛️ 大盤</button>
+      <button onclick="showPage('sentiment')">🧠 情緒</button>
+      <button onclick="showPage('industry')">🏭 產業</button>
       <button onclick="showPage('heatmap')">🔥 熱力圖</button>
-      <button onclick="showPage('scanner')">🎯 操盤掃描</button>
-      <button onclick="showPage('review')">📊 績效回顧</button>
+      <button onclick="showPage('scanner')">⚡ 掃描器</button>
+      <button onclick="showPage('stock')">📈 個股分析</button>
+      <button onclick="showPage('news')">📰 新聞</button>
+      <button onclick="showPage('journal')">📝 日誌</button>
+      <button onclick="showPage('review')">📊 績效</button>
+      <button onclick="showPage('calc')">🧮 試算</button>
     </nav>
   </div>
   <div class="mobile-nav" id="mobile-nav">
-    <button class="active" onclick="showPage('stock')">📈 個股</button>
-    <button onclick="showPage('indices')">🏛️ 指數</button>
+    <button class="active" onclick="showPage('dashboard')">🎯 交易</button>
+    <button onclick="showPage('indices')">🏛️ 大盤</button>
     <button onclick="showPage('sentiment')">🧠 情緒</button>
+    <button onclick="showPage('industry')">🏭 產業</button>
+    <button onclick="showPage('heatmap')">🔥 熱力</button>
+    <button onclick="showPage('scanner')">⚡ 掃描</button>
+    <button onclick="showPage('stock')">📈 個股</button>
     <button onclick="showPage('news')">📰 新聞</button>
     <button onclick="showPage('journal')">📝 日誌</button>
-    <button onclick="showPage('calc')">🧮 試算</button>
-    <button onclick="showPage('industry')">🏭 產業</button>
-    <button onclick="showPage('heatmap')">🔥 熱力圖</button>
-    <button onclick="showPage('scanner')">🎯 掃描</button>
     <button onclick="showPage('review')">📊 績效</button>
+    <button onclick="showPage('calc')">🧮 試算</button>
   </div>
   <div class="main">
-    <div id="page-stock" class="page active">
+    <div id="page-dashboard" class="page active">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <h2>🎯 今日交易清單</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="dash-time" style="font-size:12px;color:var(--muted)"></span>
+          <button class="btn btn-primary btn-sm" onclick="runDashboardScan()" id="dash-scan-btn">掃描市場</button>
+        </div>
+      </div>
+      <div id="dash-risk-status"></div>
+      <div id="dash-trade-list">
+        <div style="text-align:center;padding:60px 20px;color:var(--muted)">
+          <div style="font-size:48px;margin-bottom:16px">🎯</div>
+          <p style="font-size:16px;margin-bottom:8px">點擊「掃描市場」生成今日交易清單</p>
+          <p style="font-size:13px">系統將自動執行：市場掃描 → 題材偵測 → 策略匹配 → 評分排序 → 決策輸出</p>
+        </div>
+      </div>
+      <div id="dash-market-summary" style="margin-top:16px"></div>
+      <div class="flow-nav">
+        <button class="btn btn-ghost" onclick="showPage('indices')">🏛️ 大盤總覽</button>
+        <button class="btn btn-ghost" onclick="showPage('industry')">🏭 產業地圖</button>
+        <button class="btn btn-ghost" onclick="showPage('review')">📊 績效回顧</button>
+      </div>
+    </div>
+    <div id="page-stock" class="page">
       <div class="search-box">
         <select id="market-prefix" aria-label="市場選擇" style="padding:14px 12px;background:var(--card);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;outline:none;flex:0 0 auto">
           <option value="">美股</option>
@@ -680,7 +705,7 @@ async function multiChart(symbols) {
 }
 
 // ============ NAVIGATION ============
-const PAGES = ['stock', 'indices', 'sentiment', 'news', 'journal', 'calc', 'industry', 'heatmap', 'scanner', 'review'];
+const PAGES = ['dashboard', 'indices', 'sentiment', 'industry', 'heatmap', 'scanner', 'stock', 'news', 'journal', 'review', 'calc'];
 // showPage() is defined near the bottom with URL hash routing support
 
 // ============ STOCK ANALYSIS ============
@@ -3418,9 +3443,18 @@ function shortTermDecision(score, ta, price, catalystInfo) {
 
   const rr = stopLoss && takeProfit ? ((takeProfit - price) / (price - stopLoss)).toFixed(1) : '—';
 
+  // Confidence: weighted average of component strengths
+  const conf = Math.round(
+    (score.techNorm >= 60 ? 30 : score.techNorm >= 40 ? 15 : 0) +
+    (score.marketMatch >= 70 ? 25 : score.marketMatch >= 50 ? 12 : 0) +
+    (score.riskRaw >= 70 ? 20 : score.riskRaw >= 50 ? 10 : 0) +
+    ((catalystInfo && catalystInfo.heat >= 50) ? 25 : (catalystInfo && catalystInfo.heat >= 30) ? 12 : 0)
+  );
+
   return {
     score: score.total,
     decision,
+    confidence: Math.max(0, Math.min(100, conf)),
     entry_range: entryLow && entryHigh ? '$' + entryLow.toFixed(2) + ' – $' + entryHigh.toFixed(2) : '—',
     stop_loss: stopLoss ? '$' + stopLoss.toFixed(2) + ' (' + (-(1 - stopLoss/price) * 100).toFixed(1) + '%)' : '—',
     take_profit: takeProfit ? '$' + takeProfit.toFixed(2) + ' (+' + ((takeProfit/price - 1) * 100).toFixed(1) + '%)' : '—',
@@ -3902,6 +3936,7 @@ function showPage(name) {
   if (name === 'industry') loadIndustry('global');
   if (name === 'heatmap') { if (!_hmLoaded['us'] || Date.now() - (_hmLoadedAt['us']||0) > STALE_MS) loadHeatmap('us'); }
   if (name === 'review') renderReview();
+  if (name === 'dashboard') loadDashboard();
 }
 
 // ============ LEARNING SYSTEM (Self-Optimization) ============
@@ -4508,11 +4543,260 @@ function prefillSell(ticker, qty) {
   document.getElementById('j-price').focus();
 }
 
+// ============ DASHBOARD (Daily Trade List) ============
+
+const DashCache = {
+  KEY: 'ss_dash_cache',
+  get() {
+    try {
+      const d = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+      if (d.date !== new Date().toISOString().slice(0, 10)) return null;
+      return d;
+    } catch { return null; }
+  },
+  save(picks, catalysts) {
+    localStorage.setItem(this.KEY, JSON.stringify({
+      date: new Date().toISOString().slice(0, 10),
+      time: new Date().toLocaleTimeString('zh-TW'),
+      picks, catalysts,
+    }));
+  }
+};
+
+function loadDashboard() {
+  // Show risk status
+  const rc = TradeRiskCtrl.getStatus();
+  const riskEl = document.getElementById('dash-risk-status');
+  if (rc.locked) {
+    riskEl.innerHTML = '<div class="card verdict-card" style="border-left-color:var(--red)"><div class="verdict-title" style="color:var(--red)">🔒 交易鎖定</div><div class="verdict-body">' + rc.lockReason + '</div></div>';
+  } else {
+    riskEl.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px">' +
+      '<span>剩餘交易: <b style="color:var(--green)">' + rc.tradesLeft + '</b>/' + TradeRiskCtrl.MAX_DAILY_TRADES + '</span>' +
+      '<span>單筆風險: <b>' + TradeRiskCtrl.MAX_RISK_PER_TRADE + '%</b></span>' +
+      '<span>連虧: <b>' + rc.consLoss + '</b>/' + TradeRiskCtrl.MAX_CONSECUTIVE_LOSS + '</span>' +
+      '<span>回撤: <b style="color:' + (rc.drawdownPct > 5 ? 'var(--red)' : 'var(--muted)') + '">' + rc.drawdownPct.toFixed(1) + '%</b>/' + TradeRiskCtrl.MAX_DRAWDOWN_PCT + '%</span>' +
+    '</div>';
+  }
+
+  // Try loading cached scan from today
+  const cache = DashCache.get();
+  if (cache && cache.picks && cache.picks.length) {
+    document.getElementById('dash-time').textContent = '上次掃描: ' + cache.time;
+    renderDashTradeList(cache.picks, cache.catalysts || []);
+  }
+
+  // Show quick market summary (learning status)
+  const ls = LearningEngine.getSummary();
+  const msEl = document.getElementById('dash-market-summary');
+  const w = ls.weights;
+  msEl.innerHTML = '<div class="card" style="font-size:12px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+      '<div><b>⚙️ 系統狀態</b></div>' +
+      '<div style="color:var(--muted)">權重: T' + (w.tech*100).toFixed(0) + ' M' + (w.market*100).toFixed(0) + ' R' + (w.risk*100).toFixed(0) + ' C' + (w.catalyst*100).toFixed(0) + ' · 上次優化: ' + ls.lastOptimized + '</div>' +
+    '</div></div>';
+}
+
+async function runDashboardScan() {
+  const btn = document.getElementById('dash-scan-btn');
+  const listEl = document.getElementById('dash-trade-list');
+  btn.disabled = true;
+  btn.textContent = '掃描中...';
+
+  // Reuse the scanner logic
+  const mkt = 'us';
+  const stocks = HEATMAP_STOCKS[mkt] || [];
+  const tickers = stocks.map(s => s.t);
+
+  try {
+    listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p style="margin-top:12px;font-size:13px">Phase 1/4：抓取市場報價...</p></div>';
+    await fetchHistCloses(tickers);
+    const results = {};
+    for (let i = 0; i < tickers.length; i += 12) {
+      const batch = tickers.slice(i, i + 12);
+      await Promise.all(batch.map(async t => {
+        try {
+          const qp = await quickPrice(t);
+          if (!qp) { results[t] = { price: 0, chg: 0, chgPct: 0 }; return; }
+          const closes = _histCloses[qp.symbol] || _histCloses[t] || [];
+          const cc = calcChange(qp.price, closes, qp.prevClose, _chgTF);
+          results[t] = { price: qp.price, chg: cc.chg, chgPct: cc.chgPct };
+        } catch { results[t] = { price: 0, chg: 0, chgPct: 0 }; }
+      }));
+      if (i + 12 < tickers.length) await delay(80);
+    }
+
+    listEl.querySelector('p').textContent = 'Phase 2/4：偵測題材...';
+    const catalysts = detectCatalysts(results, mkt);
+
+    const tickerCatalyst = {};
+    for (const cat of catalysts) {
+      for (const sector of cat.sectors) {
+        stocks.filter(s => s.s === sector).forEach(s => {
+          if (!tickerCatalyst[s.t] || tickerCatalyst[s.t].heat < cat.heat) {
+            tickerCatalyst[s.t] = cat;
+          }
+        });
+      }
+    }
+
+    const withCatalyst = stocks.filter(s => tickerCatalyst[s.t]);
+    listEl.querySelector('p').textContent = 'Phase 3/4：策略匹配 ' + withCatalyst.length + ' 檔...';
+
+    const picks = [];
+    const stratConf = LearningEngine.getStrategyConf();
+    for (let i = 0; i < withCatalyst.length; i += 6) {
+      const batch = withCatalyst.slice(i, i + 6);
+      await Promise.all(batch.map(async s => {
+        try {
+          const chart = await yfChart(s.t, '3mo', '1d');
+          const q = chart.indicators.quote[0];
+          const closes = [], highs = [], lows = [], vols = [];
+          for (let j = 0; j < chart.timestamp.length; j++) {
+            if (q.close[j] != null) { closes.push(q.close[j]); highs.push(q.high[j]); lows.push(q.low[j]); vols.push(q.volume[j] || 0); }
+          }
+          if (closes.length < 20) return;
+          const price = chart.meta.regularMarketPrice;
+          const ta = technicalAnalysis(closes, highs, lows, vols, price);
+
+          let bestStrat = null, bestResult = null;
+          for (const [key, strat] of Object.entries(STRATEGIES)) {
+            const result = strat.check(ta, price, closes);
+            // Apply learning confidence
+            const adjScore = Math.round(result.score * (stratConf[key] || 1));
+            if (result.match && (!bestResult || adjScore > bestResult.score)) {
+              bestStrat = key;
+              bestResult = { ...result, score: adjScore };
+            }
+          }
+          if (!bestResult) return;
+
+          const cat = tickerCatalyst[s.t];
+          const scoreObj = shortTermScore(ta, bestResult, cat.heat);
+          const dec = shortTermDecision(scoreObj, ta, price, cat);
+          dec.reason = bestResult.reason;
+          const sig = classifySignal(dec, cat.heat);
+
+          picks.push({
+            ticker: s.t, name: s.n, sector: s.s, price,
+            chgPct: results[s.t]?.chgPct || 0,
+            strategy: STRATEGIES[bestStrat].name,
+            strategyIcon: STRATEGIES[bestStrat].icon,
+            strategyKey: bestStrat,
+            strategyReason: bestResult.reason,
+            decision: dec, catalyst: cat, signalType: sig,
+            ta: { rsi: ta.rsi, macd: ta.hist, volRatio: ta.volRatio, score: ta.score },
+          });
+        } catch { /* skip */ }
+      }));
+      if (i + 6 < withCatalyst.length) await delay(100);
+    }
+
+    picks.sort((a, b) => {
+      const aBoost = a.catalyst.heat >= 60 ? 5 : 0;
+      const bBoost = b.catalyst.heat >= 60 ? 5 : 0;
+      return (b.decision.score + bBoost) - (a.decision.score + aBoost);
+    });
+
+    const top = filterSignals(picks.slice(0, 10));
+    // Also store in scanner cache
+    _scanResults[mkt] = top;
+    _scanCatalysts[mkt] = catalysts;
+    DashCache.save(top, catalysts);
+
+    document.getElementById('dash-time').textContent = '掃描於 ' + new Date().toLocaleTimeString('zh-TW');
+    renderDashTradeList(top, catalysts);
+
+  } catch(e) {
+    listEl.innerHTML = '<div class="card" style="text-align:center;color:var(--red)">掃描失敗: ' + e.message + '<br><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="runDashboardScan()">重試</button></div>';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '重新掃描';
+}
+
+function renderDashTradeList(picks, catalysts) {
+  const el = document.getElementById('dash-trade-list');
+  const rc = TradeRiskCtrl.getStatus();
+
+  if (!picks.length) {
+    el.innerHTML = '<div class="card" style="text-align:center;padding:40px;color:var(--muted)">今日無符合條件的交易機會<br><span style="font-size:12px">條件：有題材 + 策略匹配 + 技術面配合</span></div>';
+    return;
+  }
+
+  // Catalyst summary
+  let html = '';
+  if (catalysts && catalysts.length) {
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+    catalysts.forEach(c => {
+      const bg = c.heat >= 60 ? 'rgba(16,185,129,.15)' : c.heat >= 35 ? 'rgba(245,158,11,.15)' : 'rgba(122,139,165,.1)';
+      const color = c.heat >= 60 ? 'var(--green)' : c.heat >= 35 ? 'var(--yellow)' : 'var(--muted)';
+      html += '<span style="padding:4px 12px;border-radius:16px;background:' + bg + ';color:' + color + ';font-size:12px;font-weight:600">' + (c.trend === 'up' ? '📈' : c.trend === 'down' ? '📉' : '➡️') + ' ' + c.theme + ' ' + c.heat + '</span>';
+    });
+    html += '</div>';
+  }
+
+  // Trade list — compact, decision-focused
+  picks.forEach((p, i) => {
+    const d = p.decision;
+    const decColor = d.decision === 'Buy' ? 'var(--green)' : d.decision === 'Wait' ? 'var(--yellow)' : 'var(--red)';
+    const decBg = d.decision === 'Buy' ? 'rgba(16,185,129,.12)' : d.decision === 'Wait' ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
+    const confColor = d.confidence >= 70 ? 'var(--green)' : d.confidence >= 40 ? 'var(--yellow)' : 'var(--red)';
+    const isBuy = d.decision === 'Buy';
+    const sigClass = p.signalType === 'strong' ? ' signal-strong' : '';
+
+    html += '<div class="card' + sigClass + '" style="border-left:4px solid ' + decColor + ';padding:16px;cursor:pointer" onclick="document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">';
+
+    // Row 1: Ticker + Decision + Score
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<span style="font-size:11px;color:var(--muted)">#' + (i+1) + '</span>';
+    html += '<span style="font-size:18px;font-weight:800">' + p.ticker + '</span>';
+    html += '<span style="font-size:13px;color:var(--muted)">' + p.name + '</span>';
+    html += '<span style="padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:' + decBg + ';color:' + decColor + '">' + d.decision + '</span>';
+    if (p.signalType === 'strong') html += '<span style="font-size:11px;color:var(--green);font-weight:700">⚡強訊號</span>';
+    html += '</div>';
+    html += '<div style="text-align:right"><div style="font-size:24px;font-weight:800;color:' + decColor + '">' + d.score + '</div><div style="font-size:10px;color:' + confColor + '">信心 ' + d.confidence + '%</div></div>';
+    html += '</div>';
+
+    // Row 2: Key metrics
+    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-bottom:6px">';
+    html += '<span>' + p.strategyIcon + ' ' + p.strategy + '</span>';
+    html += '<span style="color:' + (p.chgPct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (p.chgPct >= 0 ? '+' : '') + p.chgPct.toFixed(2) + '%</span>';
+    html += '<span>進場 ' + d.entry_range + '</span>';
+    html += '<span style="color:var(--red)">停損 ' + d.stop_loss + '</span>';
+    html += '<span style="color:var(--green)">停利 ' + (d.take_profit || '—') + '</span>';
+    html += '<span>R:R ' + (d.risk_reward || '—') + '</span>';
+    html += '<span>倉位 ' + (d.position_size || '—') + '</span>';
+    html += '</div>';
+
+    // Row 3: Reasons
+    html += '<div style="font-size:12px;color:var(--muted)">';
+    html += '<span style="color:var(--accent)">' + p.strategyReason + '</span> · ' + d.catalyst_reason;
+    html += '</div>';
+
+    // Execute button for Buy
+    if (isBuy && !rc.locked) {
+      html += '<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d._stopRaw || p.price * 0.95).toFixed(2) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button></div>';
+    }
+
+    html += '</div>';
+  });
+
+  // Claude prompt button
+  const buyOrWait = picks.filter(p => p.decision.decision === 'Buy' || p.decision.decision === 'Wait');
+  if (buyOrWait.length) {
+    html += '<div class="card" style="text-align:center"><button class="btn btn-primary btn-sm" onclick="showPage(\'scanner\');showClaudePrompt()">🤖 生成 Claude 決策 Prompt</button></div>';
+  }
+
+  el.innerHTML = html;
+}
+
 // ============ INIT ============
 document.getElementById('j-date').valueAsDate = new Date();
-// Restore page from URL hash
+// Restore page from URL hash — default to dashboard
 const _initHash = location.hash.slice(1);
 if (PAGES.includes(_initHash)) { showPage(_initHash); }
+else { showPage('dashboard'); }
 window.addEventListener('hashchange', () => {
   const page = location.hash.slice(1);
   if (PAGES.includes(page)) showPage(page);
