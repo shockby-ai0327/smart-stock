@@ -253,6 +253,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
       <button onclick="showPage('industry')">🏭 產業地圖</button>
       <button onclick="showPage('heatmap')">🔥 熱力圖</button>
       <button onclick="showPage('scanner')">🎯 操盤掃描</button>
+      <button onclick="showPage('review')">📊 績效回顧</button>
     </nav>
   </div>
   <div class="mobile-nav" id="mobile-nav">
@@ -265,6 +266,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
     <button onclick="showPage('industry')">🏭 產業</button>
     <button onclick="showPage('heatmap')">🔥 熱力圖</button>
     <button onclick="showPage('scanner')">🎯 掃描</button>
+    <button onclick="showPage('review')">📊 績效</button>
   </div>
   <div class="main">
     <div id="page-stock" class="page active">
@@ -303,7 +305,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <div class="form-group"><label>買/賣</label><select id="j-action"><option value="buy">買入</option><option value="sell">賣出</option></select></div>
           <div class="form-group"><label>價格</label><input type="number" id="j-price" step="0.01" placeholder="150.00"></div>
           <div class="form-group"><label>數量</label><input type="number" id="j-qty" placeholder="100"></div>
-          <div class="form-group"><label>策略</label><select id="j-strategy"><option value="value">價值投資</option><option value="swing">波段交易</option><option value="day">當沖</option><option value="other">其他</option></select></div>
+          <div class="form-group"><label>策略</label><select id="j-strategy"><option value="momentum">動能突破</option><option value="catalyst">題材帶動</option><option value="pullback">回檔反彈</option><option value="swing">波段交易</option><option value="value">價值投資</option><option value="day">當沖</option><option value="other">其他</option></select></div>
           <div class="form-group"><label>手續費率</label><input type="text" value="買賣各 0.3%（自動計算）" disabled style="color:var(--orange);font-size:12px"></div>
           <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="addJournal()">新增紀錄</button></div>
           <div class="form-group full"><label>備註</label><textarea id="j-notes" placeholder="交易理由、觀察..."></textarea></div>
@@ -366,6 +368,17 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
         </div>
       </div>
       <div id="claude-prompt-area" style="display:none"></div>
+    </div>
+    <div id="page-review" class="page">
+      <h2 style="margin-bottom:20px">📊 績效回顧</h2>
+      <div id="review-summary"></div>
+      <div id="review-equity" class="card" style="display:none"><h3>📈 權益曲線</h3><canvas id="equity-canvas" height="200"></canvas></div>
+      <div id="review-trades"></div>
+      <div id="review-strategies"></div>
+      <div class="flow-nav">
+        <button class="btn btn-primary" onclick="showPage('journal')">📝 新增交易紀錄</button>
+        <button class="btn btn-ghost" onclick="showPage('scanner')">🎯 掃描新機會</button>
+      </div>
     </div>
   </div>
 </div>
@@ -667,7 +680,7 @@ async function multiChart(symbols) {
 }
 
 // ============ NAVIGATION ============
-const PAGES = ['stock', 'indices', 'sentiment', 'news', 'journal', 'calc', 'industry', 'heatmap', 'scanner'];
+const PAGES = ['stock', 'indices', 'sentiment', 'news', 'journal', 'calc', 'industry', 'heatmap', 'scanner', 'review'];
 // showPage() is defined near the bottom with URL hash routing support
 
 // ============ STOCK ANALYSIS ============
@@ -2670,6 +2683,34 @@ function loadIndustry(tab) {
   });
   rankHtml += '<div style="margin-top:10px;font-size:11px;color:var(--muted)">點擊任一產業查看詳細分析與領導企業</div></div>';
 
+  // ── Capital Flow Rotation ──
+  const hmMkt = tab === 'global' ? 'us' : 'tw';
+  const rotation = CapitalFlow.getRotation(hmMkt);
+  if (rotation) {
+    rankHtml += '<div class="card" style="margin-bottom:16px"><h3>💰 資金流向 (今日 vs ' + rotation.prevDate + ')</h3>';
+    const inflows = rotation.rotation.filter(r => r.flow === 'in');
+    const outflows = rotation.rotation.filter(r => r.flow === 'out');
+    rankHtml += '<div class="grid2" style="margin-top:8px">';
+    rankHtml += '<div><div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:6px">🟢 資金流入</div>';
+    if (inflows.length) {
+      inflows.slice(0, 6).forEach(r => {
+        rankHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px"><span>' + r.sector + '</span><span style="color:var(--green);font-weight:700">+' + r.delta.toFixed(2) + '%</span></div>';
+      });
+    } else { rankHtml += '<div style="font-size:12px;color:var(--muted)">無明顯流入</div>'; }
+    rankHtml += '</div>';
+    rankHtml += '<div><div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:6px">🔴 資金流出</div>';
+    if (outflows.length) {
+      outflows.slice(0, 6).forEach(r => {
+        rankHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px"><span>' + r.sector + '</span><span style="color:var(--red);font-weight:700">' + r.delta.toFixed(2) + '%</span></div>';
+      });
+    } else { rankHtml += '<div style="font-size:12px;color:var(--muted)">無明顯流出</div>'; }
+    rankHtml += '</div></div>';
+    rankHtml += '<div style="margin-top:8px;padding:8px;background:rgba(59,130,246,.1);border-radius:6px;font-size:12px"><b>操盤提示：</b>' +
+      (inflows.length > outflows.length ? '資金淨流入偏多，關注流入板塊的強勢股突破機會。' :
+       outflows.length > inflows.length ? '資金淨流出偏多，避開流出板塊，防守為主。' :
+       '資金流向分散，選擇性操作有明確題材的板塊。') + '</div></div>';
+  }
+
   // ── 2. Quick Pick: Top Strong + Weak with leaders ──
   let quickHtml = '<div class="grid2" style="margin-bottom:16px">';
   // Strong
@@ -2869,6 +2910,22 @@ async function loadHeatmap(tab) {
   }
   _hmLoaded[tab] = true;
   _hmLoadedAt[tab] = Date.now();
+  // Save sector data for capital flow rotation tracking
+  try {
+    const stocks = HEATMAP_STOCKS[tab];
+    const sectorAvgs = {};
+    const sectorData = {};
+    stocks.forEach(s => {
+      const r = results[s.t];
+      if (!r) return;
+      if (!sectorData[s.s]) sectorData[s.s] = [];
+      sectorData[s.s].push(r.chgPct || 0);
+    });
+    for (const [sec, vals] of Object.entries(sectorData)) {
+      sectorAvgs[sec] = vals.reduce((a, b) => a + b, 0) / vals.length;
+    }
+    CapitalFlow.save(tab, sectorAvgs);
+  } catch(e) { console.warn('CapitalFlow save failed:', e); }
   if (_heatmapTimer) clearInterval(_heatmapTimer);
   _heatmapTimer = setInterval(() => { if (_currentPage === 'heatmap') loadHeatmap(_heatmapTab); }, 180000);
 }
@@ -2921,6 +2978,51 @@ function renderHeatmap(tab, results) {
   const verdict = avgChg > 1 ? '🟢 市場偏多，可積極找機會' : avgChg > 0 ? '🟡 市場中性偏多，選擇性進場' : avgChg > -1 ? '🟡 市場觀望，減少操作' : '🔴 市場偏空，防守為主';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px"><div>漲跌幅：' + tfBtnHtml('switchTF') + '</div><div style="font-size:12px;color:var(--muted)">更新: ' + timeStr + '</div></div>';
   html += '<div class="card" style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px"><div style="font-size:15px;font-weight:700">' + verdict + '</div><div style="display:flex;gap:20px;font-size:13px"><span>均值: <b style="color:' + (avgChg >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (avgChg >= 0 ? '+' : '') + avgChg.toFixed(2) + '%</b></span><span>🟢 ' + up + '</span><span>🔴 ' + dn + '</span></div></div></div>';
+
+  // ── SIGNAL ENGINE (Structured Signal Output) ──
+  const signals = generateSignals(results, tab);
+  const sigTabs = [
+    { key: 'strongest', label: '🚀 動能最強', color: 'var(--green)' },
+    { key: 'breakouts', label: '💥 突破', color: 'var(--accent)' },
+    { key: 'unusualVol', label: '📊 異常量能', color: 'var(--yellow)' },
+    { key: 'weakest', label: '🔻 最弱(空方)', color: 'var(--red)' },
+  ];
+  html += '<div class="card" style="margin-bottom:16px"><h3>📡 Signal Scanner</h3>';
+  html += '<div class="tab-bar" id="signal-tabs">';
+  sigTabs.forEach((t, i) => {
+    html += '<button class="' + (i === 0 ? 'active' : '') + '" onclick="document.querySelectorAll(\'.signal-panel\').forEach(p=>p.style.display=\'none\');document.getElementById(\'sig-' + t.key + '\').style.display=\'\';document.querySelectorAll(\'#signal-tabs button\').forEach(b=>b.classList.remove(\'active\'));this.classList.add(\'active\')">' + t.label + ' (' + signals[t.key].length + ')</button>';
+  });
+  html += '</div>';
+  sigTabs.forEach((t, i) => {
+    const list = signals[t.key];
+    html += '<div class="signal-panel" id="sig-' + t.key + '" style="' + (i !== 0 ? 'display:none' : '') + '">';
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:16px;color:var(--muted)">無符合條件</div>';
+    } else {
+      html += '<div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Name</th><th>Sector</th><th>Change</th><th>Strength</th><th>Breakout</th><th></th></tr></thead><tbody>';
+      list.forEach(s => {
+        const chgC = s.chgPct >= 0 ? 'var(--green)' : 'var(--red)';
+        const strCls = s.strength === 'High' ? 'badge-green' : s.strength === 'Mid' ? 'badge-yellow' : s.strength === 'Low' ? 'badge-blue' : 'badge-red';
+        html += '<tr><td><b>' + s.ticker + '</b></td><td>' + s.name + '</td><td style="color:var(--muted)">' + s.sector + '</td><td style="color:' + chgC + ';font-weight:700">' + (s.chgPct >= 0 ? '+' : '') + s.chgPct.toFixed(2) + '%</td><td><span class="badge ' + strCls + '">' + s.strength + '</span></td><td>' + (s.breakout ? '<span class="badge badge-green">YES</span>' : '—') + '</td><td><button class="btn btn-sm btn-primary" onclick="' + hmClick(s.ticker) + '">分析</button></td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // ── Capital Flow Rotation ──
+  const rotation = CapitalFlow.getRotation(tab);
+  if (rotation) {
+    html += '<div class="card" style="margin-bottom:16px"><h3>💰 資金流向 (vs ' + rotation.prevDate + ')</h3>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">';
+    rotation.rotation.slice(0, 12).forEach(r => {
+      const icon = r.flow === 'in' ? '🟢↑' : r.flow === 'out' ? '🔴↓' : '⚪→';
+      const color = r.flow === 'in' ? 'rgba(16,185,129,.15)' : r.flow === 'out' ? 'rgba(239,68,68,.15)' : 'rgba(122,139,165,.1)';
+      html += '<div style="padding:6px 12px;border-radius:8px;background:' + color + ';font-size:12px">' + icon + ' <b>' + r.sector + '</b> ' + (r.delta >= 0 ? '+' : '') + r.delta.toFixed(2) + '%</div>';
+    });
+    html += '</div></div>';
+  }
 
   // ── OPPORTUNITY SCANNER (Top section) ──
   html += '<div class="grid3" style="margin-bottom:16px">';
@@ -3600,6 +3702,7 @@ function renderScanResults(mkt) {
         '<div>🔥 ' + d.catalyst_reason + '</div>' +
         '<div style="color:var(--muted)">RSI ' + p.ta.rsi.toFixed(1) + ' · MACD柱 ' + (p.ta.macd > 0 ? '+' : '') + p.ta.macd.toFixed(3) + ' · 量比 ' + p.ta.volRatio.toFixed(1) + 'x</div>' +
       '</div>' +
+      (d.decision === 'Buy' ? '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d.stop_loss ? d.stop_loss.replace(/[^0-9.]/g,'') : p.price * 0.95) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">🔍 詳細分析</button></div>' : '') +
     '</div>';
   });
 
@@ -3709,6 +3812,441 @@ function showPage(name) {
   if (name === 'journal') renderJournal();
   if (name === 'industry') loadIndustry('global');
   if (name === 'heatmap') { if (!_hmLoaded['us'] || Date.now() - (_hmLoadedAt['us']||0) > STALE_MS) loadHeatmap('us'); }
+  if (name === 'review') renderReview();
+}
+
+// ============ SIGNAL ENGINE (Structured Output) ============
+
+function generateSignals(heatmapResults, market) {
+  const stocks = HEATMAP_STOCKS[market] || [];
+  const signals = { strongest: [], breakouts: [], unusualVol: [], weakest: [] };
+
+  const enriched = stocks.map(s => {
+    const r = heatmapResults[s.t];
+    if (!r || !r.price) return null;
+    const closes = _histCloses[s.t] || [];
+    // volume ratio from last known data
+    let volRatio = 1;
+    if (closes.length > 20) {
+      // approximate from price change magnitude
+      volRatio = Math.abs(r.chgPct) > 3 ? 2.0 : Math.abs(r.chgPct) > 1.5 ? 1.5 : 1.0;
+    }
+    return {
+      ticker: s.t, name: s.n, sector: s.s,
+      price: r.price, chgPct: r.chgPct || 0,
+      strength: r.chgPct > 3 ? 'High' : r.chgPct > 1 ? 'Mid' : r.chgPct > 0 ? 'Low' : 'Weak',
+      breakout: r.chgPct > 3,
+      volumeAnomaly: volRatio >= 1.8,
+      volRatio,
+    };
+  }).filter(Boolean);
+
+  // Top 10 Strongest (by chgPct desc)
+  signals.strongest = enriched.filter(s => s.chgPct > 0)
+    .sort((a, b) => b.chgPct - a.chgPct).slice(0, 10);
+
+  // Top 10 Breakouts (>3% change)
+  signals.breakouts = enriched.filter(s => s.breakout)
+    .sort((a, b) => b.chgPct - a.chgPct).slice(0, 10);
+
+  // Top 10 Unusual Volume
+  signals.unusualVol = enriched.filter(s => Math.abs(s.chgPct) > 2)
+    .sort((a, b) => Math.abs(b.chgPct) - Math.abs(a.chgPct)).slice(0, 10);
+
+  // Top 10 Weakest (for short reference)
+  signals.weakest = enriched.filter(s => s.chgPct < 0)
+    .sort((a, b) => a.chgPct - b.chgPct).slice(0, 10);
+
+  return signals;
+}
+
+function renderSignalTable(signals, container) {
+  const tabs = [
+    { key: 'strongest', label: '🚀 動能最強', color: 'var(--green)' },
+    { key: 'breakouts', label: '💥 突破', color: 'var(--accent)' },
+    { key: 'unusualVol', label: '📊 異常量', color: 'var(--yellow)' },
+    { key: 'weakest', label: '🔻 最弱(做空參考)', color: 'var(--red)' },
+  ];
+
+  let html = '<div class="card"><h3>📡 Signal Scanner</h3>';
+  html += '<div class="tab-bar" id="signal-tabs">';
+  tabs.forEach((t, i) => {
+    html += '<button class="' + (i === 0 ? 'active' : '') + '" onclick="switchSignalTab(\'' + t.key + '\')">' + t.label + ' (' + signals[t.key].length + ')</button>';
+  });
+  html += '</div>';
+
+  tabs.forEach(t => {
+    const list = signals[t.key];
+    html += '<div class="signal-panel" id="sig-' + t.key + '" style="' + (t.key !== 'strongest' ? 'display:none' : '') + '">';
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:20px;color:var(--muted)">無符合條件的股票</div>';
+    } else {
+      html += '<table><thead><tr><th>Ticker</th><th>Name</th><th>Sector</th><th>Change</th><th>Strength</th><th>Breakout</th><th>Vol</th><th></th></tr></thead><tbody>';
+      list.forEach(s => {
+        const chgColor = s.chgPct >= 0 ? 'var(--green)' : 'var(--red)';
+        const strBg = s.strength === 'High' ? 'badge-green' : s.strength === 'Mid' ? 'badge-yellow' : s.strength === 'Low' ? 'badge-blue' : 'badge-red';
+        html += '<tr>' +
+          '<td><b>' + s.ticker + '</b></td>' +
+          '<td>' + s.name + '</td>' +
+          '<td style="color:var(--muted)">' + s.sector + '</td>' +
+          '<td style="color:' + chgColor + ';font-weight:700">' + (s.chgPct >= 0 ? '+' : '') + s.chgPct.toFixed(2) + '%</td>' +
+          '<td><span class="badge ' + strBg + '">' + s.strength + '</span></td>' +
+          '<td>' + (s.breakout ? '<span class="badge badge-green">YES</span>' : '—') + '</td>' +
+          '<td>' + (s.volumeAnomaly ? '<span class="badge badge-yellow">HIGH</span>' : '—') + '</td>' +
+          '<td><button class="btn btn-sm btn-primary" onclick="document.getElementById(\'ticker-input\').value=\'' + s.ticker + '\';showPage(\'stock\');analyzeStock()">分析</button></td>' +
+          '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  container.insertAdjacentHTML('afterbegin', html);
+}
+
+function switchSignalTab(key) {
+  document.querySelectorAll('.signal-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('sig-' + key).style.display = '';
+  document.querySelectorAll('#signal-tabs button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+// ============ CAPITAL FLOW MAP (Industry Rotation) ============
+
+const CapitalFlow = {
+  KEY: 'ss_capital_flow',
+  save(market, sectorData) {
+    try {
+      const store = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+      const today = new Date().toISOString().slice(0, 10);
+      if (!store[market]) store[market] = {};
+      // Keep yesterday and today only
+      const dates = Object.keys(store[market]).sort();
+      if (dates.length > 5) {
+        dates.slice(0, dates.length - 5).forEach(d => delete store[market][d]);
+      }
+      store[market][today] = sectorData;
+      localStorage.setItem(this.KEY, JSON.stringify(store));
+    } catch(e) { console.warn('CapitalFlow save error:', e); }
+  },
+  getRotation(market) {
+    try {
+      const store = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+      if (!store[market]) return null;
+      const dates = Object.keys(store[market]).sort();
+      if (dates.length < 2) return null;
+      const today = store[market][dates[dates.length - 1]];
+      const prev = store[market][dates[dates.length - 2]];
+      const rotation = [];
+      for (const sector of Object.keys(today)) {
+        const todayAvg = today[sector];
+        const prevAvg = prev[sector] || 0;
+        rotation.push({
+          sector,
+          today: todayAvg,
+          prev: prevAvg,
+          flow: todayAvg > prevAvg + 0.3 ? 'in' : todayAvg < prevAvg - 0.3 ? 'out' : 'flat',
+          delta: todayAvg - prevAvg,
+        });
+      }
+      rotation.sort((a, b) => b.delta - a.delta);
+      return { rotation, todayDate: dates[dates.length - 1], prevDate: dates[dates.length - 2] };
+    } catch { return null; }
+  }
+};
+
+// ============ REVIEW SYSTEM (Performance Analytics) ============
+
+function pairTrades(journal) {
+  // Pair buy/sell by ticker, FIFO
+  const openByTicker = {};
+  const closed = [];
+
+  // Sort by date asc
+  const sorted = [...journal].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+
+  for (const entry of sorted) {
+    if (!entry.ticker) continue;
+    if (!openByTicker[entry.ticker]) openByTicker[entry.ticker] = [];
+
+    if (entry.action === 'buy') {
+      openByTicker[entry.ticker].push(entry);
+    } else if (entry.action === 'sell') {
+      const opens = openByTicker[entry.ticker];
+      if (opens.length > 0) {
+        const buyEntry = opens.shift();
+        const qty = Math.min(buyEntry.qty, entry.qty);
+        const buyTotal = buyEntry.price * qty;
+        const sellTotal = entry.price * qty;
+        const fee = (buyTotal + sellTotal) * FEE;
+        const pnl = sellTotal - buyTotal - fee;
+        const pnlPct = ((entry.price - buyEntry.price) / buyEntry.price * 100);
+        const holdDays = Math.max(1, Math.round((new Date(entry.date) - new Date(buyEntry.date)) / 86400000));
+        closed.push({
+          ticker: entry.ticker,
+          buyDate: buyEntry.date,
+          sellDate: entry.date,
+          buyPrice: buyEntry.price,
+          sellPrice: entry.price,
+          qty,
+          pnl,
+          pnlPct,
+          holdDays,
+          strategy: buyEntry.strategy || 'other',
+          won: pnl > 0,
+          notes: (buyEntry.notes || '') + (entry.notes ? ' | ' + entry.notes : ''),
+        });
+      }
+    }
+  }
+
+  // Open positions
+  const open = [];
+  for (const [ticker, entries] of Object.entries(openByTicker)) {
+    for (const e of entries) {
+      open.push({ ticker, date: e.date, price: e.price, qty: e.qty, strategy: e.strategy });
+    }
+  }
+
+  return { closed, open };
+}
+
+function calcPerformance(closed) {
+  if (!closed.length) return null;
+  const wins = closed.filter(t => t.won);
+  const losses = closed.filter(t => !t.won);
+  const totalPnl = closed.reduce((s, t) => s + t.pnl, 0);
+  const avgPnl = totalPnl / closed.length;
+  const avgWin = wins.length ? wins.reduce((s, t) => s + t.pnlPct, 0) / wins.length : 0;
+  const avgLoss = losses.length ? losses.reduce((s, t) => s + t.pnlPct, 0) / losses.length : 0;
+  const avgHold = closed.reduce((s, t) => s + t.holdDays, 0) / closed.length;
+
+  // Max drawdown (sequential)
+  let peak = 0, maxDD = 0, equity = 0;
+  const equityCurve = [0];
+  for (const t of closed) {
+    equity += t.pnl;
+    equityCurve.push(equity);
+    if (equity > peak) peak = equity;
+    const dd = peak - equity;
+    if (dd > maxDD) maxDD = dd;
+  }
+
+  // By strategy
+  const byStrat = {};
+  for (const t of closed) {
+    if (!byStrat[t.strategy]) byStrat[t.strategy] = { trades: 0, wins: 0, pnl: 0, pnlPcts: [] };
+    byStrat[t.strategy].trades++;
+    if (t.won) byStrat[t.strategy].wins++;
+    byStrat[t.strategy].pnl += t.pnl;
+    byStrat[t.strategy].pnlPcts.push(t.pnlPct);
+  }
+
+  // Profit factor
+  const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0)) || 1;
+  const profitFactor = grossWin / grossLoss;
+
+  // Best/worst trade
+  const best = closed.reduce((a, b) => a.pnlPct > b.pnlPct ? a : b);
+  const worst = closed.reduce((a, b) => a.pnlPct < b.pnlPct ? a : b);
+
+  // Consecutive wins/losses
+  let maxConsW = 0, maxConsL = 0, cw = 0, cl = 0;
+  for (const t of closed) {
+    if (t.won) { cw++; cl = 0; } else { cl++; cw = 0; }
+    if (cw > maxConsW) maxConsW = cw;
+    if (cl > maxConsL) maxConsL = cl;
+  }
+
+  return {
+    total: closed.length,
+    wins: wins.length,
+    losses: losses.length,
+    winRate: (wins.length / closed.length * 100),
+    totalPnl, avgPnl,
+    avgWinPct: avgWin, avgLossPct: avgLoss,
+    avgHoldDays: avgHold,
+    maxDrawdown: maxDD,
+    profitFactor,
+    best, worst,
+    maxConsWins: maxConsW, maxConsLosses: maxConsL,
+    equityCurve,
+    byStrategy: byStrat,
+  };
+}
+
+function renderReview() {
+  const journal = getJ();
+  const { closed, open } = pairTrades(journal);
+  const sumEl = document.getElementById('review-summary');
+  const trEl = document.getElementById('review-trades');
+  const strEl = document.getElementById('review-strategies');
+  const eqEl = document.getElementById('review-equity');
+
+  if (!closed.length && !open.length) {
+    sumEl.innerHTML = '<div class="card" style="text-align:center;padding:40px;color:var(--muted)">' +
+      '<div style="font-size:48px;margin-bottom:16px">📊</div>' +
+      '<p style="font-size:16px;margin-bottom:8px">尚無已配對交易</p>' +
+      '<p style="font-size:13px">在交易日誌中記錄買入和賣出，系統會自動配對計算績效</p>' +
+      '<p style="font-size:12px;margin-top:12px;color:var(--accent)">同一股票的買入→賣出會自動配對為一筆完整交易</p></div>';
+    trEl.innerHTML = '';
+    strEl.innerHTML = '';
+    eqEl.style.display = 'none';
+    return;
+  }
+
+  const perf = closed.length ? calcPerformance(closed) : null;
+  const fmt = v => '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他', momentum: '動能突破', catalyst: '題材帶動', pullback: '回檔反彈' };
+
+  // ── Summary cards ──
+  if (perf) {
+    const wrColor = perf.winRate >= 50 ? 'var(--green)' : 'var(--red)';
+    const pnlColor = perf.totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+    sumEl.innerHTML =
+      '<div class="grid4">' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">勝率</div><div style="font-size:32px;font-weight:800;color:' + wrColor + '">' + perf.winRate.toFixed(1) + '%</div><div style="font-size:12px;color:var(--muted)">' + perf.wins + 'W / ' + perf.losses + 'L</div></div>' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">累計損益</div><div style="font-size:28px;font-weight:800;color:' + pnlColor + '">' + (perf.totalPnl >= 0 ? '+' : '') + fmt(perf.totalPnl) + '</div><div style="font-size:12px;color:var(--muted)">平均 ' + (perf.avgPnl >= 0 ? '+' : '') + fmt(perf.avgPnl) + '/筆</div></div>' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">最大回撤</div><div style="font-size:28px;font-weight:800;color:var(--red)">' + fmt(perf.maxDrawdown) + '</div><div style="font-size:12px;color:var(--muted)">Profit Factor: ' + perf.profitFactor.toFixed(2) + '</div></div>' +
+        '<div class="card" style="text-align:center"><div style="font-size:12px;color:var(--muted)">平均持有</div><div style="font-size:28px;font-weight:800;color:var(--accent)">' + perf.avgHoldDays.toFixed(1) + '天</div><div style="font-size:12px;color:var(--muted)">連勝 ' + perf.maxConsWins + ' / 連敗 ' + perf.maxConsLosses + '</div></div>' +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div class="card"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">平均獲利</span><span style="color:var(--green);font-weight:700">+' + perf.avgWinPct.toFixed(2) + '%</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">平均虧損</span><span style="color:var(--red);font-weight:700">' + perf.avgLossPct.toFixed(2) + '%</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">盈虧比</span><span style="font-weight:700">' + (perf.avgLossPct !== 0 ? Math.abs(perf.avgWinPct / perf.avgLossPct).toFixed(2) : '∞') + '</span></div></div>' +
+        '<div class="card"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">最佳交易</span><span style="color:var(--green);font-weight:700">' + perf.best.ticker + ' +' + perf.best.pnlPct.toFixed(2) + '%</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">最差交易</span><span style="color:var(--red);font-weight:700">' + perf.worst.ticker + ' ' + perf.worst.pnlPct.toFixed(2) + '%</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-top:8px"><span style="color:var(--muted)">總交易次數</span><span style="font-weight:700">' + perf.total + '</span></div></div>' +
+      '</div>';
+
+    // Equity curve
+    if (perf.equityCurve.length > 2) {
+      eqEl.style.display = '';
+      drawEquityCurve(perf.equityCurve);
+    }
+
+    // By strategy
+    const stratEntries = Object.entries(perf.byStrategy);
+    if (stratEntries.length > 0) {
+      let shtml = '<div class="card"><h3>📋 策略績效比較</h3><table><thead><tr><th>策略</th><th>交易</th><th>勝率</th><th>累計損益</th><th>平均%</th><th>評級</th></tr></thead><tbody>';
+      stratEntries.forEach(([key, s]) => {
+        const wr = s.trades ? (s.wins / s.trades * 100) : 0;
+        const avgP = s.pnlPcts.length ? (s.pnlPcts.reduce((a,b)=>a+b,0) / s.pnlPcts.length) : 0;
+        const grade = wr >= 60 && avgP > 0 ? 'A' : wr >= 50 && avgP > 0 ? 'B' : wr >= 40 ? 'C' : 'D';
+        const gradeColor = grade === 'A' ? 'var(--green)' : grade === 'B' ? 'var(--accent)' : grade === 'C' ? 'var(--yellow)' : 'var(--red)';
+        shtml += '<tr><td><b>' + (sl[key] || key) + '</b></td><td>' + s.trades + '</td><td style="color:' + (wr >= 50 ? 'var(--green)' : 'var(--red)') + ';font-weight:700">' + wr.toFixed(1) + '%</td><td style="color:' + (s.pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (s.pnl >= 0 ? '+' : '') + fmt(s.pnl) + '</td><td style="color:' + (avgP >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (avgP >= 0 ? '+' : '') + avgP.toFixed(2) + '%</td><td><span class="badge" style="background:' + gradeColor + ';color:#fff;font-weight:700">' + grade + '</span></td></tr>';
+      });
+      shtml += '</tbody></table></div>';
+      strEl.innerHTML = shtml;
+    }
+  } else {
+    sumEl.innerHTML = '';
+    strEl.innerHTML = '';
+    eqEl.style.display = 'none';
+  }
+
+  // ── Trade history ──
+  let thtml = '<div class="card"><h3>📜 已完成交易紀錄</h3>';
+  if (closed.length) {
+    thtml += '<table><thead><tr><th>買入</th><th>賣出</th><th>Ticker</th><th>買價</th><th>賣價</th><th>數量</th><th>損益</th><th>%</th><th>天數</th><th>策略</th></tr></thead><tbody>';
+    closed.forEach(t => {
+      const color = t.won ? 'var(--green)' : 'var(--red)';
+      thtml += '<tr><td>' + t.buyDate + '</td><td>' + t.sellDate + '</td><td><b>' + t.ticker + '</b></td><td>' + t.buyPrice.toFixed(2) + '</td><td>' + t.sellPrice.toFixed(2) + '</td><td>' + t.qty + '</td><td style="color:' + color + ';font-weight:700">' + (t.pnl >= 0 ? '+' : '') + fmt(t.pnl) + '</td><td style="color:' + color + ';font-weight:700">' + (t.pnlPct >= 0 ? '+' : '') + t.pnlPct.toFixed(2) + '%</td><td>' + t.holdDays + '</td><td>' + (sl[t.strategy] || t.strategy) + '</td></tr>';
+    });
+    thtml += '</tbody></table>';
+  } else {
+    thtml += '<div style="text-align:center;padding:20px;color:var(--muted)">配對買入和賣出紀錄後自動顯示</div>';
+  }
+  thtml += '</div>';
+
+  // Open positions
+  if (open.length) {
+    thtml += '<div class="card"><h3>📌 未平倉部位</h3><table><thead><tr><th>日期</th><th>Ticker</th><th>買入價</th><th>數量</th><th>策略</th><th></th></tr></thead><tbody>';
+    open.forEach(o => {
+      thtml += '<tr><td>' + o.date + '</td><td><b>' + o.ticker + '</b></td><td>' + o.price.toFixed(2) + '</td><td>' + o.qty + '</td><td>' + (sl[o.strategy] || o.strategy) + '</td><td><button class="btn btn-sm btn-primary" onclick="prefillSell(\'' + o.ticker + '\',' + o.qty + ')">記錄賣出</button></td></tr>';
+    });
+    thtml += '</tbody></table></div>';
+  }
+
+  trEl.innerHTML = thtml;
+}
+
+function drawEquityCurve(curve) {
+  const canvas = document.getElementById('equity-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = canvas.parentElement.clientWidth - 40;
+  const h = canvas.height = 180;
+  ctx.clearRect(0, 0, w, h);
+
+  const max = Math.max(...curve, 0);
+  const min = Math.min(...curve, 0);
+  const range = (max - min) || 1;
+  const pad = 10;
+  const plotW = w - pad * 2;
+  const plotH = h - pad * 2;
+
+  // Zero line
+  const zeroY = pad + plotH * (1 - (0 - min) / range);
+  ctx.strokeStyle = 'rgba(122,139,165,0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(pad, zeroY);
+  ctx.lineTo(w - pad, zeroY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Equity line
+  ctx.strokeStyle = curve[curve.length - 1] >= 0 ? '#10b981' : '#ef4444';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  curve.forEach((v, i) => {
+    const x = pad + (i / (curve.length - 1)) * plotW;
+    const y = pad + plotH * (1 - (v - min) / range);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Fill
+  const lastX = pad + plotW;
+  const lastY = pad + plotH * (1 - (curve[curve.length - 1] - min) / range);
+  ctx.lineTo(lastX, zeroY);
+  ctx.lineTo(pad, zeroY);
+  ctx.closePath();
+  ctx.fillStyle = curve[curve.length - 1] >= 0 ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+  ctx.fill();
+}
+
+// ============ EXECUTION FLOW (Scanner → Journal) ============
+
+function executeTrade(ticker, price, stopLoss, strategy, catalyst) {
+  // Pre-fill journal form and switch to journal page
+  showPage('journal');
+  document.getElementById('j-date').valueAsDate = new Date();
+  document.getElementById('j-ticker').value = ticker;
+  document.getElementById('j-action').value = 'buy';
+  document.getElementById('j-price').value = price.toFixed(2);
+  document.getElementById('j-qty').focus();
+  document.getElementById('j-notes').value = '策略: ' + strategy + ' | 停損: $' + stopLoss + ' | 題材: ' + catalyst;
+
+  // Update strategy dropdown if matching
+  const stratMap = { '動能突破': 'swing', '題材帶動': 'swing', '回檔反彈': 'swing' };
+  const sel = document.getElementById('j-strategy');
+  if (stratMap[strategy]) sel.value = stratMap[strategy];
+
+  // Record in risk control
+  // (Don't record yet — wait for actual journal save)
+}
+
+function prefillSell(ticker, qty) {
+  showPage('journal');
+  document.getElementById('j-date').valueAsDate = new Date();
+  document.getElementById('j-ticker').value = ticker;
+  document.getElementById('j-action').value = 'sell';
+  document.getElementById('j-qty').value = qty;
+  document.getElementById('j-price').focus();
 }
 
 // ============ INIT ============
