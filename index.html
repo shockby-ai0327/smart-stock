@@ -4074,7 +4074,7 @@ async function runFullScan() {
           const evResult = ExpectationEngine.calcFromStrategy(bestStrat);
 
           // EV ≤ 0 with sufficient data → skip (prohibited)
-          if (evResult.ev <= 0 && !evResult.reason) continue;
+          if (evResult.ev <= 0 && !evResult.reason) return;
 
           // Recalculate confidence using Edge system
           const stratPerf = EdgeEngine.getStratPerf()[bestStrat];
@@ -5167,7 +5167,7 @@ async function runDashboardScan() {
           // ── Edge + EV Calculation ──
           const edge = EdgeEngine.calcEdge(bestStrat, cat.heat, isRegimeFit, ta.score);
           const evResult = ExpectationEngine.calcFromStrategy(bestStrat);
-          if (evResult.ev <= 0 && !evResult.reason) continue;
+          if (evResult.ev <= 0 && !evResult.reason) return;
 
           const stratPerf = EdgeEngine.getStratPerf()[bestStrat];
           dec.confidence = calcFinalConfidence(edge.edge_score, edge.ev, stratPerf, isRegimeFit);
