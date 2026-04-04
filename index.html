@@ -288,6 +288,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <p style="font-size:13px">系統將自動執行：市場掃描 → 題材偵測 → 策略匹配 → 評分排序 → 決策輸出</p>
         </div>
       </div>
+      <div id="dash-edge-ranking" style="margin-top:16px"></div>
       <div id="dash-market-summary" style="margin-top:16px"></div>
       <div class="flow-nav">
         <button class="btn btn-ghost" onclick="showPage('indices')">🏛️ 大盤總覽</button>
@@ -399,6 +400,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
       <h2 style="margin-bottom:20px">📊 績效回顧</h2>
       <div id="review-summary"></div>
       <div id="review-equity" class="card" style="display:none"><h3>📈 權益曲線</h3><canvas id="equity-canvas" height="200"></canvas></div>
+      <div id="review-proof"></div>
       <div id="review-trades"></div>
       <div id="review-strategies"></div>
       <div class="flow-nav">
@@ -3985,9 +3987,10 @@ async function runFullScan() {
     const withCatalyst = stocks.filter(s => tickerCatalyst[s.t]);
     status.textContent = '📊 策略匹配 ' + withCatalyst.length + ' 檔有題材股 (' + regime.regime + ' regime)...';
 
-    // Phase 4: Run technical analysis + REGIME-GATED strategy matching
+    // Phase 4: Run technical analysis + REGIME-GATED strategy matching + EDGE/EV
     const picks = [];
     const stratConf = LearningEngine.getStrategyConf();
+    const stratFilter = EdgeEngine.getStrategyFilter();
     for (let i = 0; i < withCatalyst.length; i += 6) {
       const batch = withCatalyst.slice(i, i + 6);
       status.textContent = '📊 分析 ' + Math.min(i + 6, withCatalyst.length) + '/' + withCatalyst.length + '...';
@@ -4006,12 +4009,15 @@ async function runFullScan() {
           const price = chart.meta.regularMarketPrice;
           const ta = technicalAnalysis(closes, highs, lows, vols, price);
 
-          // Try all strategies — but check REGIME GATE
+          // Try all strategies — check REGIME GATE + STRATEGY FILTER
           let bestStrat = null, bestResult = null, isRegimeFit = false;
           for (const [key, strat] of Object.entries(STRATEGIES)) {
+            // Strategy Filter: skip disabled strategies (PF < 1)
+            if (stratFilter[key] && !stratFilter[key].allowed) continue;
             const result = strat.check(ta, price, closes);
-            // Apply learning confidence
-            const adjScore = Math.round(result.score * (stratConf[key] || 1));
+            // Apply learning confidence + strategy filter weight
+            const filterWeight = stratFilter[key] ? stratFilter[key].weight : 1;
+            const adjScore = Math.round(result.score * (stratConf[key] || 1) * filterWeight);
             const stratAllowed = allowedStrats[key] !== false;
             if (result.match && (!bestResult || adjScore > bestResult.score)) {
               bestStrat = key;
@@ -4026,6 +4032,17 @@ async function runFullScan() {
           const dec = shortTermDecision(scoreObj, ta, price, cat);
           dec.reason = bestResult.reason;
           const sig = classifySignal(dec, cat.heat);
+
+          // ── Edge + EV Calculation ──
+          const edge = EdgeEngine.calcEdge(bestStrat, cat.heat, isRegimeFit, ta.score);
+          const evResult = ExpectationEngine.calcFromStrategy(bestStrat);
+
+          // EV ≤ 0 with sufficient data → skip (prohibited)
+          if (evResult.ev <= 0 && !evResult.reason) continue;
+
+          // Recalculate confidence using Edge system
+          const stratPerf = EdgeEngine.getStratPerf()[bestStrat];
+          dec.confidence = calcFinalConfidence(edge.edge_score, edge.ev, stratPerf, isRegimeFit);
 
           picks.push({
             ticker: s.t,
@@ -4042,15 +4059,23 @@ async function runFullScan() {
             signalType: sig,
             regimeFit: isRegimeFit,
             ta: { rsi: ta.rsi, macd: ta.hist, volRatio: ta.volRatio, score: ta.score },
+            edge_score: edge.edge_score,
+            ev: edge.ev,
+            trade_quality: edge.trade_quality,
+            edge_based_on: edge.based_on,
+            win_probability: edge.win_probability,
+            expected_return: edge.expected_return,
           });
         } catch { /* skip failed stocks */ }
       }));
       if (i + 6 < withCatalyst.length) await delay(100);
     }
 
-    // Phase 5: Sort — regime-fit stocks first, then by score + catalyst boost
+    // Phase 5: Sort — by edge_score first (if available), then regime-fit, then score
     picks.sort((a, b) => {
-      // Regime-fit stocks always rank higher
+      // Edge score is primary sort (higher = better)
+      if (a.edge_score !== b.edge_score) return (b.edge_score || 0) - (a.edge_score || 0);
+      // Regime-fit stocks rank higher
       if (a.regimeFit !== b.regimeFit) return a.regimeFit ? -1 : 1;
       const aBoost = a.catalyst.heat >= 60 ? 5 : 0;
       const bBoost = b.catalyst.heat >= 60 ? 5 : 0;
@@ -4148,10 +4173,17 @@ function renderScanResults(mkt) {
         '<div>倉位 <b>' + (d.position_size || '—') + '</b></div>' +
         '<div>風險 <b>' + (d.risk_percent || '—') + '</b></div>' +
       '</div>' +
+      // ── Edge / EV badges ──
+      (p.edge_score != null ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0;font-size:11px">' +
+        '<span style="padding:2px 10px;border-radius:8px;font-weight:700;background:' + (p.edge_score >= 60 ? 'rgba(16,185,129,.12)' : p.edge_score >= 35 ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)') + ';color:' + (p.edge_score >= 60 ? 'var(--green)' : p.edge_score >= 35 ? 'var(--yellow)' : 'var(--red)') + '">Edge ' + p.edge_score + '</span>' +
+        ExpectationEngine.renderBadge(p.ev, p.trade_quality) +
+        '<span style="color:var(--muted)">WinProb ' + p.win_probability + ' · ExpRet ' + p.expected_return + '</span>' +
+      '</div>' : '') +
       '<div class="pick-detail">' +
         '<div style="color:var(--accent)">📊 ' + p.strategyReason + '</div>' +
         '<div>🔥 ' + d.catalyst_reason + '</div>' +
         '<div style="color:var(--muted)">RSI ' + p.ta.rsi.toFixed(1) + ' · MACD柱 ' + (p.ta.macd > 0 ? '+' : '') + p.ta.macd.toFixed(3) + ' · 量比 ' + p.ta.volRatio.toFixed(1) + 'x · Regime ' + (d.regime || 'N/A') + '</div>' +
+        (p.edge_based_on ? '<div style="color:var(--muted);font-size:10px;margin-top:2px">Edge依據: ' + p.edge_based_on.join(' · ') + '</div>' : '') +
       '</div>' +
       (d.decision === 'Buy' ? '<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d._stopRaw || p.price * 0.95).toFixed(2) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById(\'ticker-input\').value=\'' + p.ticker + '\';showPage(\'stock\');analyzeStock()">🔍 詳細分析</button></div>' : '') +
     '</div>';
@@ -4748,6 +4780,12 @@ function renderReview() {
         })() +
       '</div>';
 
+    // ── Proof System Dashboard ──
+    const proofEl = document.getElementById('review-proof');
+    if (proofEl) {
+      proofEl.innerHTML = ProofSystem.renderProofDashboard();
+    }
+
     // Equity curve
     if (perf.equityCurve.length > 2) {
       eqEl.style.display = '';
@@ -4772,6 +4810,8 @@ function renderReview() {
     sumEl.innerHTML = '';
     strEl.innerHTML = '';
     eqEl.style.display = 'none';
+    const proofElEmpty = document.getElementById('review-proof');
+    if (proofElEmpty) proofElEmpty.innerHTML = '';
   }
 
   // ── Trade history ──
@@ -4862,6 +4902,20 @@ function executeTrade(ticker, price, stopLoss, strategy, catalyst) {
     alert('🐻 空頭市場（信心 ' + regime.confidence + '%），系統禁止做多交易。\n請等待市場狀態改善。');
     return;
   }
+  // EV check — strategy must have positive expected value
+  const stratMap = { '動能突破': 'momentum', '題材帶動': 'catalyst', '回檔反彈': 'pullback', '跳空追擊': 'gapgo', '均值回歸': 'meanrev' };
+  const stratKey = stratMap[strategy] || strategy;
+  const evCheck = ExpectationEngine.calcFromStrategy(stratKey);
+  if (evCheck.ev <= 0 && !evCheck.reason) {
+    alert('⛔ 策略「' + strategy + '」EV = ' + evCheck.ev.toFixed(2) + ' ≤ 0\n\n期望值為負，系統禁止交易。\n請改用其他正EV策略。');
+    return;
+  }
+  // Edge check — minimum threshold
+  const edgeCheck = EdgeEngine.getStratPerf()[stratKey];
+  if (edgeCheck && edgeCheck.total >= 5 && edgeCheck.profitFactor < 1.0) {
+    alert('⛔ 策略「' + strategy + '」Profit Factor = ' + edgeCheck.profitFactor.toFixed(2) + ' < 1.0\n\n策略績效虧損，已被系統禁用。');
+    return;
+  }
 
   // Calculate position size based on risk budget
   const riskMul = MarketRegime.getRiskMultiplier(regime.regime);
@@ -4881,13 +4935,13 @@ function executeTrade(ticker, price, stopLoss, strategy, catalyst) {
     ' | 停損: $' + stopLoss +
     ' | 題材: ' + catalyst +
     ' | Regime: ' + regime.regime +
+    ' | EV: ' + evCheck.ev.toFixed(2) + ' (' + evCheck.quality + ')' +
     ' | 風險: ' + maxRisk.toFixed(1) + '% (預算 ' + (riskMul * 100).toFixed(0) + '%)' +
     ' | 每股風險: $' + riskPerShare.toFixed(2) + ' (' + riskPctPerShare.toFixed(1) + '%)';
 
-  // Update strategy dropdown if matching
-  const stratMap = { '動能突破': 'momentum', '題材帶動': 'catalyst', '回檔反彈': 'pullback', '跳空追擊': 'gapgo', '均值回歸': 'meanrev' };
+  // Update strategy dropdown if matching (reuse stratMap/stratKey from EV check above)
   const sel = document.getElementById('j-strategy');
-  const mappedVal = stratMap[strategy];
+  const mappedVal = stratKey;
   if (mappedVal) {
     // Check if option exists
     for (const opt of sel.options) { if (opt.value === mappedVal) { sel.value = mappedVal; break; } }
@@ -4962,6 +5016,7 @@ function loadDashboard() {
       if (regimeEl) regimeEl.innerHTML = MarketRegime.renderBadge(cache.regime);
     }
     renderDashTradeList(cache.picks, cache.catalysts || []);
+    renderDashEdgeRanking(cache.picks);
     // Restore trade list in risk control
     TradeRiskCtrl.setTradeList(cache.picks);
   }
@@ -5035,6 +5090,7 @@ async function runDashboardScan() {
 
     const picks = [];
     const stratConf = LearningEngine.getStrategyConf();
+    const stratFilter = EdgeEngine.getStrategyFilter();
     for (let i = 0; i < withCatalyst.length; i += 6) {
       const batch = withCatalyst.slice(i, i + 6);
       await Promise.all(batch.map(async s => {
@@ -5049,11 +5105,13 @@ async function runDashboardScan() {
           const price = chart.meta.regularMarketPrice;
           const ta = technicalAnalysis(closes, highs, lows, vols, price);
 
-          // Regime-gated strategy matching
+          // Regime-gated + Strategy Filter matching
           let bestStrat = null, bestResult = null, isRegimeFit = false;
           for (const [key, strat] of Object.entries(STRATEGIES)) {
+            if (stratFilter[key] && !stratFilter[key].allowed) continue;
             const result = strat.check(ta, price, closes);
-            const adjScore = Math.round(result.score * (stratConf[key] || 1));
+            const filterWeight = stratFilter[key] ? stratFilter[key].weight : 1;
+            const adjScore = Math.round(result.score * (stratConf[key] || 1) * filterWeight);
             const stratAllowed = allowedStrats[key] !== false;
             if (result.match && (!bestResult || adjScore > bestResult.score)) {
               bestStrat = key;
@@ -5069,6 +5127,14 @@ async function runDashboardScan() {
           dec.reason = bestResult.reason;
           const sig = classifySignal(dec, cat.heat);
 
+          // ── Edge + EV Calculation ──
+          const edge = EdgeEngine.calcEdge(bestStrat, cat.heat, isRegimeFit, ta.score);
+          const evResult = ExpectationEngine.calcFromStrategy(bestStrat);
+          if (evResult.ev <= 0 && !evResult.reason) continue;
+
+          const stratPerf = EdgeEngine.getStratPerf()[bestStrat];
+          dec.confidence = calcFinalConfidence(edge.edge_score, edge.ev, stratPerf, isRegimeFit);
+
           picks.push({
             ticker: s.t, name: s.n, sector: s.s, price,
             chgPct: results[s.t]?.chgPct || 0,
@@ -5079,14 +5145,21 @@ async function runDashboardScan() {
             decision: dec, catalyst: cat, signalType: sig,
             regimeFit: isRegimeFit,
             ta: { rsi: ta.rsi, macd: ta.hist, volRatio: ta.volRatio, score: ta.score },
+            edge_score: edge.edge_score,
+            ev: edge.ev,
+            trade_quality: edge.trade_quality,
+            edge_based_on: edge.based_on,
+            win_probability: edge.win_probability,
+            expected_return: edge.expected_return,
           });
         } catch { /* skip */ }
       }));
       if (i + 6 < withCatalyst.length) await delay(100);
     }
 
-    // Sort: regime-fit first, then by score + catalyst boost
+    // Sort: by edge_score first, then regime-fit, then score
     picks.sort((a, b) => {
+      if (a.edge_score !== b.edge_score) return (b.edge_score || 0) - (a.edge_score || 0);
       if (a.regimeFit !== b.regimeFit) return a.regimeFit ? -1 : 1;
       const aBoost = a.catalyst.heat >= 60 ? 5 : 0;
       const bBoost = b.catalyst.heat >= 60 ? 5 : 0;
@@ -5107,6 +5180,7 @@ async function runDashboardScan() {
 
     document.getElementById('dash-time').textContent = regime.regime + ' | 掃描於 ' + new Date().toLocaleTimeString('zh-TW');
     renderDashTradeList(top, catalysts);
+    renderDashEdgeRanking(top);
 
   } catch(e) {
     listEl.innerHTML = '<div class="card" style="text-align:center;color:var(--red)">掃描失敗: ' + e.message + '<br><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="runDashboardScan()">重試</button></div>';
@@ -5180,15 +5254,30 @@ function renderDashTradeList(picks, catalysts) {
     html += '<span>風險 ' + (d.risk_percent || '—') + '</span>';
     html += '</div>';
 
+    // Row 2.5: Edge / EV badges
+    if (p.edge_score != null) {
+      const edgeColor = p.edge_score >= 60 ? 'var(--green)' : p.edge_score >= 35 ? 'var(--yellow)' : 'var(--red)';
+      const edgeBg = p.edge_score >= 60 ? 'rgba(16,185,129,.12)' : p.edge_score >= 35 ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;align-items:center">';
+      html += '<span style="padding:2px 10px;border-radius:8px;font-size:11px;font-weight:700;background:' + edgeBg + ';color:' + edgeColor + '">Edge ' + p.edge_score + '</span>';
+      html += ExpectationEngine.renderBadge(p.ev, p.trade_quality);
+      html += '<span style="font-size:10px;color:var(--muted)">WinProb ' + (p.win_probability || '—') + ' · ExpRet ' + (p.expected_return || '—') + '</span>';
+      html += '</div>';
+    }
+
     // Row 3: Reasons
     html += '<div style="font-size:12px;color:var(--muted)">';
     html += '<span style="color:var(--accent)">' + (p.strategyReason || '') + '</span> · ' + d.catalyst_reason;
     if (!rfOk) html += ' · <span style="color:var(--red)">策略不符合當前 Regime</span>';
+    if (p.edge_based_on) html += '<div style="font-size:10px;margin-top:2px">Edge依據: ' + p.edge_based_on.join(' · ') + '</div>';
     html += '</div>';
 
-    // Execute button — ONLY for Buy + regime-fit + not locked
-    if (isBuy && rfOk && !rc.locked) {
+    // Execute button — ONLY for Buy + regime-fit + not locked + EV > 0
+    const evOk = p.ev == null || p.ev > 0;
+    if (isBuy && rfOk && !rc.locked && evOk) {
       html += '<div style="margin-top:8px"><button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="event.stopPropagation();executeTrade(\'' + p.ticker + '\',' + p.price + ',' + (d._stopRaw || p.price * 0.95).toFixed(2) + ',\'' + p.strategy + '\',\'' + (p.catalyst ? p.catalyst.theme : '') + '\')">✅ 執行交易</button></div>';
+    } else if (isBuy && !evOk) {
+      html += '<div style="margin-top:8px;font-size:11px;color:var(--red)">⛔ EV ≤ 0，期望值為負，禁止交易</div>';
     } else if (isBuy && !rfOk) {
       html += '<div style="margin-top:8px;font-size:11px;color:var(--red)">⛔ Regime 不允許此策略，禁止執行</div>';
     }
@@ -5203,6 +5292,372 @@ function renderDashTradeList(picks, catalysts) {
   }
 
   el.innerHTML = html;
+}
+
+// ============ DASHBOARD EDGE RANKING ============
+
+function renderDashEdgeRanking(picks) {
+  const el = document.getElementById('dash-edge-ranking');
+  if (!el) return;
+  const hasEdge = picks.some(p => p.edge_score != null);
+  if (!hasEdge) { el.innerHTML = ''; return; }
+
+  const sorted = [...picks].filter(p => p.edge_score != null).sort((a, b) => (b.edge_score || 0) - (a.edge_score || 0));
+  if (!sorted.length) { el.innerHTML = ''; return; }
+
+  let html = '<div class="card" style="border-left:4px solid var(--accent)">';
+  html += '<h3 style="margin-bottom:12px">🏆 Edge Ranking</h3>';
+  html += '<div class="table-wrap"><table><thead><tr><th>#</th><th>Ticker</th><th>Edge</th><th>EV</th><th>Quality</th><th>WinProb</th><th>ExpRet</th><th>策略</th></tr></thead><tbody>';
+  sorted.forEach((p, i) => {
+    const edgeColor = p.edge_score >= 60 ? 'var(--green)' : p.edge_score >= 35 ? 'var(--yellow)' : 'var(--red)';
+    const evColor = p.ev > 0 ? 'var(--green)' : 'var(--red)';
+    const qColor = p.trade_quality === 'High' ? 'var(--green)' : p.trade_quality === 'Medium' ? 'var(--yellow)' : 'var(--red)';
+    html += '<tr>';
+    html += '<td>' + (i + 1) + '</td>';
+    html += '<td><b>' + p.ticker + '</b></td>';
+    html += '<td style="color:' + edgeColor + ';font-weight:800;font-size:16px">' + p.edge_score + '</td>';
+    html += '<td style="color:' + evColor + ';font-weight:700">' + (p.ev >= 0 ? '+' : '') + p.ev.toFixed(2) + '</td>';
+    html += '<td style="color:' + qColor + '">' + p.trade_quality + '</td>';
+    html += '<td>' + (p.win_probability || '—') + '</td>';
+    html += '<td>' + (p.expected_return || '—') + '</td>';
+    html += '<td>' + p.strategyIcon + ' ' + p.strategy + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Strategy filter summary
+  const filter = EdgeEngine.getStrategyFilter();
+  const filterEntries = Object.entries(filter);
+  if (filterEntries.length) {
+    const stratNames = { momentum: '🚀 動能', catalyst: '🔥 題材', pullback: '🔄 回檔', gapgo: '⚡ 跳空', meanrev: '🎯 均值' };
+    html += '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">';
+    filterEntries.forEach(([key, f]) => {
+      const bg = f.status === 'active' ? 'rgba(16,185,129,.1)' : f.status === 'disabled' ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)';
+      const color = f.status === 'active' ? 'var(--green)' : f.status === 'disabled' ? 'var(--red)' : 'var(--yellow)';
+      const icon = f.status === 'active' ? '✅' : f.status === 'disabled' ? '⛔' : f.status === 'downweight' ? '⚠️' : f.status === 'cautious' ? '🔶' : '🆕';
+      html += '<span style="padding:3px 10px;border-radius:12px;font-size:10px;background:' + bg + ';color:' + color + '">' + icon + ' ' + (stratNames[key] || key) + '</span>';
+    });
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ============ EDGE ENGINE (Trading Edge Quantification) ============
+
+const EdgeEngine = {
+  // ── Strategy Performance Tracker (persisted) ──
+  PERF_KEY: 'ss_strat_perf',
+
+  _getPerf() {
+    try { return JSON.parse(localStorage.getItem(this.PERF_KEY) || '{}'); } catch { return {}; }
+  },
+  _savePerf(d) { localStorage.setItem(this.PERF_KEY, JSON.stringify(d)); },
+
+  // Rebuild strategy performance from journal
+  rebuildFromJournal() {
+    const journal = getJ();
+    const { closed } = pairTrades(journal);
+    const stratMap = { '動能突破': 'momentum', '題材帶動': 'catalyst', '回檔反彈': 'pullback', '跳空追擊': 'gapgo', '均值回歸': 'meanrev', swing: 'momentum', value: 'pullback', day: 'gapgo' };
+    const perf = {};
+
+    for (const t of closed) {
+      const key = stratMap[t.strategy] || t.strategy;
+      if (!perf[key]) perf[key] = { wins: 0, losses: 0, total: 0, pnls: [], maxDD: 0, grossWin: 0, grossLoss: 0, trades: [] };
+      const s = perf[key];
+      s.total++;
+      if (t.won) { s.wins++; s.grossWin += t.pnl; }
+      else { s.losses++; s.grossLoss += Math.abs(t.pnl); }
+      s.pnls.push(t.pnlPct);
+      s.trades.push({ ticker: t.ticker, pnlPct: t.pnlPct, won: t.won, date: t.sellDate, holdDays: t.holdDays });
+    }
+
+    // Compute derived stats
+    for (const [key, s] of Object.entries(perf)) {
+      s.winRate = s.total > 0 ? s.wins / s.total : 0;
+      s.avgReturn = s.pnls.length > 0 ? s.pnls.reduce((a, b) => a + b, 0) / s.pnls.length : 0;
+      s.avgWin = s.wins > 0 ? s.pnls.filter(p => p > 0).reduce((a, b) => a + b, 0) / s.wins : 0;
+      s.avgLoss = s.losses > 0 ? Math.abs(s.pnls.filter(p => p <= 0).reduce((a, b) => a + b, 0) / s.losses) : 0;
+      s.profitFactor = s.grossLoss > 0 ? s.grossWin / s.grossLoss : s.grossWin > 0 ? 999 : 0;
+      // Max drawdown within strategy
+      let eq = 0, peak = 0, dd = 0;
+      for (const p of s.pnls) { eq += p; if (eq > peak) peak = eq; if (peak - eq > dd) dd = peak - eq; }
+      s.maxDD = dd;
+      // EV = (winRate × avgWin) - (lossRate × avgLoss)
+      s.ev = (s.winRate * s.avgWin) - ((1 - s.winRate) * s.avgLoss);
+    }
+
+    this._savePerf(perf);
+    return perf;
+  },
+
+  // Get strategy performance (cached or rebuilt)
+  getStratPerf() {
+    const perf = this._getPerf();
+    if (Object.keys(perf).length === 0) return this.rebuildFromJournal();
+    return perf;
+  },
+
+  // ── Rolling Performance (last N trades) ──
+  getRollingPerf(n) {
+    const journal = getJ();
+    const { closed } = pairTrades(journal);
+    const recent = closed.slice(-n);
+    if (!recent.length) return { winRate: 0, avgReturn: 0, total: 0, ev: 0, profitFactor: 0 };
+    const wins = recent.filter(t => t.won);
+    const losses = recent.filter(t => !t.won);
+    const wr = wins.length / recent.length;
+    const avgWin = wins.length ? wins.reduce((s, t) => s + t.pnlPct, 0) / wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.pnlPct, 0) / losses.length) : 0;
+    const grossW = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossL = Math.abs(losses.reduce((s, t) => s + t.pnl, 0)) || 1;
+    return {
+      winRate: wr,
+      avgReturn: recent.reduce((s, t) => s + t.pnlPct, 0) / recent.length,
+      total: recent.length,
+      ev: (wr * avgWin) - ((1 - wr) * avgLoss),
+      profitFactor: grossW / grossL,
+      avgWin, avgLoss,
+    };
+  },
+
+  // ── Strategy Filter: returns which strategies are allowed ──
+  getStrategyFilter() {
+    const perf = this.getStratPerf();
+    const filter = {};
+    for (const [key, s] of Object.entries(perf)) {
+      if (s.total < 3) { filter[key] = { status: 'new', reason: '交易不足 3 筆，無法評估', allowed: true, weight: 0.8 }; continue; }
+      if (s.profitFactor < 1.0) {
+        filter[key] = { status: 'disabled', reason: 'Profit Factor < 1.0 (' + s.profitFactor.toFixed(2) + ')，策略虧損，已禁用', allowed: false, weight: 0 };
+      } else if (s.winRate < 0.40) {
+        filter[key] = { status: 'downweight', reason: '勝率 < 40% (' + (s.winRate * 100).toFixed(1) + '%)，已降權', allowed: true, weight: 0.5 };
+      } else if (s.maxDD > 15) {
+        filter[key] = { status: 'cautious', reason: 'Max DD ' + s.maxDD.toFixed(1) + '% > 15%，需謹慎', allowed: true, weight: 0.7 };
+      } else {
+        filter[key] = { status: 'active', reason: '績效正常', allowed: true, weight: 1.0 };
+      }
+    }
+    return filter;
+  },
+
+  // ── Edge Score Calculation ──
+  // Computes edge for a specific trade opportunity
+  calcEdge(strategyKey, catalystHeat, regimeFit, techScore) {
+    const perf = this.getStratPerf();
+    const stratPerf = perf[strategyKey] || {};
+    const rolling10 = this.getRollingPerf(10);
+    const filter = this.getStrategyFilter();
+    const stratFilter = filter[strategyKey];
+
+    // Strategy win rate component (0-100) — 30% weight
+    const stratWinRate = stratPerf.total >= 3 ? stratPerf.winRate : 0.50; // default 50% if no data
+    const stratComponent = stratWinRate * 100;
+
+    // Tech score component (0-100) — 30% weight
+    const techComponent = Math.max(0, Math.min(100, techScore || 50));
+
+    // Regime fit component (0 or 100) — 20% weight
+    const regimeComponent = regimeFit ? 100 : 0;
+
+    // Catalyst strength component (0-100) — 20% weight
+    const catComponent = Math.max(0, Math.min(100, catalystHeat || 0));
+
+    let edgeScore = Math.round(
+      stratComponent * 0.30 +
+      techComponent * 0.30 +
+      regimeComponent * 0.20 +
+      catComponent * 0.20
+    );
+
+    // Apply strategy filter penalty
+    if (stratFilter && !stratFilter.allowed) edgeScore = 0;
+    else if (stratFilter && stratFilter.weight < 1) edgeScore = Math.round(edgeScore * stratFilter.weight);
+
+    // Recent performance penalty: if last 10 trades EV < 0, penalize
+    if (rolling10.total >= 5 && rolling10.ev < 0) {
+      edgeScore = Math.round(edgeScore * 0.7);
+    }
+
+    edgeScore = Math.max(0, Math.min(100, edgeScore));
+
+    // Expected return = strategy avg return * confidence factor
+    const expectedReturn = stratPerf.avgReturn || 0;
+    const winProb = stratWinRate;
+    const rr = stratPerf.avgWin && stratPerf.avgLoss > 0 ? stratPerf.avgWin / stratPerf.avgLoss : 1;
+
+    // EV for this specific opportunity
+    const ev = (winProb * (stratPerf.avgWin || 2)) - ((1 - winProb) * (stratPerf.avgLoss || 2));
+    const tradeQuality = ev > 1.5 ? 'High' : ev > 0 ? 'Medium' : 'Low';
+
+    return {
+      edge_score: edgeScore,
+      expected_return: expectedReturn.toFixed(2) + '%',
+      win_probability: (winProb * 100).toFixed(1) + '%',
+      risk_reward_ratio: rr.toFixed(2),
+      ev: ev,
+      trade_quality: tradeQuality,
+      based_on: [
+        '策略勝率 ' + (stratWinRate * 100).toFixed(0) + '% (' + (stratPerf.total || 0) + '筆)',
+        '技術面 ' + techComponent.toFixed(0) + '/100',
+        regimeFit ? '✓ Regime匹配' : '✗ Regime不匹配',
+        '題材熱度 ' + catComponent.toFixed(0) + '/100',
+        stratFilter ? stratFilter.reason : '',
+        rolling10.total >= 5 ? '近10筆EV ' + rolling10.ev.toFixed(2) : '',
+      ].filter(Boolean),
+      _stratWR: stratWinRate,
+      _stratTotal: stratPerf.total || 0,
+      _ev: ev,
+      _filterStatus: stratFilter ? stratFilter.status : 'unknown',
+    };
+  },
+};
+
+// ============ EXPECTATION ENGINE (EV Calculation) ============
+
+const ExpectationEngine = {
+  // Calculate EV for a trade
+  calcEV(winRate, avgWinPct, avgLossPct) {
+    const ev = (winRate * avgWinPct) - ((1 - winRate) * Math.abs(avgLossPct));
+    return {
+      ev: ev,
+      quality: ev > 1.5 ? 'High' : ev > 0 ? 'Medium' : 'Low',
+      allowed: ev > 0, // EV ≤ 0 → prohibited
+    };
+  },
+
+  // Calculate from strategy performance
+  calcFromStrategy(strategyKey) {
+    const perf = EdgeEngine.getStratPerf();
+    const s = perf[strategyKey];
+    if (!s || s.total < 3) return { ev: 0, quality: 'Unknown', allowed: true, reason: '數據不足' };
+    return this.calcEV(s.winRate, s.avgWin, s.avgLoss);
+  },
+
+  // Render EV badge HTML
+  renderBadge(ev, quality) {
+    const color = quality === 'High' ? 'var(--green)' : quality === 'Medium' ? 'var(--yellow)' : 'var(--red)';
+    const bg = quality === 'High' ? 'rgba(16,185,129,.12)' : quality === 'Medium' ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
+    return '<span style="padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:' + bg + ';color:' + color + '">EV ' + (ev >= 0 ? '+' : '') + ev.toFixed(2) + ' ' + quality + '</span>';
+  },
+};
+
+// ============ PROOF SYSTEM (Performance Verification) ============
+
+const ProofSystem = {
+  // Generate comprehensive strategy performance report
+  getStrategyReport() {
+    const perf = EdgeEngine.rebuildFromJournal(); // always rebuild for freshness
+    const filter = EdgeEngine.getStrategyFilter();
+    const report = [];
+    const stratNames = { momentum: '🚀 動能突破', catalyst: '🔥 題材帶動', pullback: '🔄 回檔反彈', gapgo: '⚡ 跳空追擊', meanrev: '🎯 均值回歸' };
+
+    for (const [key, s] of Object.entries(perf)) {
+      const f = filter[key] || { status: 'unknown', allowed: true };
+      report.push({
+        key,
+        name: stratNames[key] || key,
+        winRate: s.winRate,
+        avgReturn: s.avgReturn,
+        avgWin: s.avgWin,
+        avgLoss: s.avgLoss,
+        maxDD: s.maxDD,
+        totalTrades: s.total,
+        profitFactor: s.profitFactor,
+        ev: s.ev,
+        filterStatus: f.status,
+        filterReason: f.reason,
+        allowed: f.allowed,
+        recentTrades: (s.trades || []).slice(-5),
+      });
+    }
+
+    return report.sort((a, b) => b.ev - a.ev);
+  },
+
+  // Rolling performance windows
+  getRollingWindows() {
+    return {
+      last10: EdgeEngine.getRollingPerf(10),
+      last30: EdgeEngine.getRollingPerf(30),
+      last90: EdgeEngine.getRollingPerf(90),
+    };
+  },
+
+  // Render the full proof dashboard
+  renderProofDashboard() {
+    const report = this.getStrategyReport();
+    const rolling = this.getRollingWindows();
+    let html = '';
+
+    // ── Rolling Performance ──
+    html += '<div class="card" style="border-left:4px solid var(--accent)">';
+    html += '<h3>📊 Rolling Performance</h3>';
+    html += '<div class="grid3" style="margin-top:12px">';
+    [['last10', '近 10 筆'], ['last30', '近 30 筆'], ['last90', '近 90 筆']].forEach(([key, label]) => {
+      const r = rolling[key];
+      const wrColor = r.winRate >= 0.5 ? 'var(--green)' : 'var(--red)';
+      const evColor = r.ev > 0 ? 'var(--green)' : 'var(--red)';
+      html += '<div style="padding:12px;background:var(--bg);border-radius:8px;text-align:center">';
+      html += '<div style="font-size:12px;color:var(--muted)">' + label + (r.total > 0 ? ' (' + r.total + '筆)' : '') + '</div>';
+      if (r.total === 0) {
+        html += '<div style="font-size:14px;color:var(--muted);margin-top:6px">無資料</div>';
+      } else {
+        html += '<div style="font-size:22px;font-weight:800;color:' + wrColor + ';margin-top:4px">' + (r.winRate * 100).toFixed(1) + '%</div>';
+        html += '<div style="font-size:11px;color:var(--muted)">EV <span style="color:' + evColor + ';font-weight:700">' + (r.ev >= 0 ? '+' : '') + r.ev.toFixed(2) + '</span> · PF ' + r.profitFactor.toFixed(2) + '</div>';
+        html += '<div style="font-size:11px;color:var(--muted)">Avg ' + (r.avgReturn >= 0 ? '+' : '') + r.avgReturn.toFixed(2) + '%</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div></div>';
+
+    // ── Strategy Performance Table ──
+    if (report.length > 0) {
+      html += '<div class="card"><h3>🏆 Strategy Edge Ranking</h3>';
+      html += '<div class="table-wrap"><table><thead><tr><th>策略</th><th>交易</th><th>勝率</th><th>Avg Return</th><th>EV</th><th>PF</th><th>Max DD</th><th>狀態</th></tr></thead><tbody>';
+      report.forEach(s => {
+        const wrColor = s.winRate >= 0.5 ? 'var(--green)' : 'var(--red)';
+        const evColor = s.ev > 0 ? 'var(--green)' : 'var(--red)';
+        const pfColor = s.profitFactor >= 1.5 ? 'var(--green)' : s.profitFactor >= 1 ? 'var(--yellow)' : 'var(--red)';
+        const statusColor = s.filterStatus === 'active' ? 'var(--green)' : s.filterStatus === 'disabled' ? 'var(--red)' : s.filterStatus === 'downweight' ? 'var(--yellow)' : 'var(--muted)';
+        const statusIcon = s.filterStatus === 'active' ? '✅' : s.filterStatus === 'disabled' ? '⛔' : s.filterStatus === 'downweight' ? '⚠️' : s.filterStatus === 'cautious' ? '🔶' : '🆕';
+        html += '<tr>';
+        html += '<td><b>' + s.name + '</b></td>';
+        html += '<td>' + s.totalTrades + '</td>';
+        html += '<td style="color:' + wrColor + ';font-weight:700">' + (s.winRate * 100).toFixed(1) + '%</td>';
+        html += '<td style="color:' + (s.avgReturn >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (s.avgReturn >= 0 ? '+' : '') + s.avgReturn.toFixed(2) + '%</td>';
+        html += '<td style="color:' + evColor + ';font-weight:700">' + (s.ev >= 0 ? '+' : '') + s.ev.toFixed(2) + '</td>';
+        html += '<td style="color:' + pfColor + '">' + s.profitFactor.toFixed(2) + '</td>';
+        html += '<td style="color:var(--red)">' + s.maxDD.toFixed(1) + '%</td>';
+        html += '<td style="color:' + statusColor + '">' + statusIcon + ' ' + s.filterStatus + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      // Strategy filter details
+      html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font-size:11px">';
+      report.forEach(s => {
+        const bg = s.filterStatus === 'active' ? 'rgba(16,185,129,.1)' : s.filterStatus === 'disabled' ? 'rgba(239,68,68,.1)' : 'rgba(245,158,11,.1)';
+        const color = s.filterStatus === 'active' ? 'var(--green)' : s.filterStatus === 'disabled' ? 'var(--red)' : 'var(--yellow)';
+        html += '<span style="padding:4px 10px;border-radius:12px;background:' + bg + ';color:' + color + '">' + s.name + ': ' + s.filterReason + '</span>';
+      });
+      html += '</div></div>';
+    }
+
+    return html;
+  },
+};
+
+// ============ CONFIDENCE SYSTEM (Integrated) ============
+
+function calcFinalConfidence(edgeScore, ev, stratPerf, regimeFit) {
+  // Weighted combination
+  let conf = 0;
+  conf += Math.min(40, edgeScore * 0.4); // Edge: max 40 pts
+  conf += ev > 1.5 ? 25 : ev > 0.5 ? 15 : ev > 0 ? 8 : 0; // EV: max 25 pts
+  conf += stratPerf && stratPerf.winRate > 0.55 ? 20 : stratPerf && stratPerf.winRate > 0.45 ? 10 : 0; // Strategy track record: max 20 pts
+  conf += regimeFit ? 15 : 0; // Regime fit: max 15 pts
+  return Math.max(0, Math.min(100, Math.round(conf)));
 }
 
 // ============ INIT ============
