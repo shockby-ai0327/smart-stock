@@ -381,8 +381,9 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
     </div>
     <div id="page-portfolio" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <h2>💼 長線配置 & 債券引擎</h2>
+        <h2>💼 資產配置決策系統</h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="pf-capital-quick" type="number" placeholder="總資本" style="padding:6px 12px;width:140px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px" onchange="PortfolioLayer.setTotalCapital(parseFloat(this.value)||0)">
           <button class="btn btn-primary" onclick="runPortfolioEngine()" id="pf-run-btn">分析配置</button>
           <button class="btn btn-ghost btn-sm" onclick="runRebalanceCheck()">檢查再平衡</button>
           <button class="btn btn-ghost btn-sm" onclick="exportPortfolioReport()">匯出報告</button>
@@ -6660,24 +6661,33 @@ function executeTradeWithValidation(ticker, price, stopLoss, strategy, catalyst)
 // Replace global
 executeTrade = executeTradeWithValidation;
 
-// ============ 長線配置 + 債券引擎 (Long-Term Portfolio & Bond Engine) ============
+// ============ 資產配置決策系統 (Asset Allocation Decision System) ============
 
-// ① Portfolio Layer — 三層資本配置
+// ① Portfolio Layer — 三層資本配置 + 資本管理
 const PortfolioLayer = {
   KEY: 'ss_portfolio',
   TIERS: {
-    shortTerm: { label: '短線操盤', defaultPct: 30, min: 15, max: 45 },
-    longTerm:  { label: '長線持股', defaultPct: 50, min: 30, max: 65 },
-    bond:      { label: '債券配置', defaultPct: 20, min: 10, max: 40 }
+    shortTerm: { label: '短線操盤', defaultPct: 20, min: 10, max: 40 },
+    longTerm:  { label: '長線持股', defaultPct: 50, min: 20, max: 70 },
+    bond:      { label: '債券配置', defaultPct: 30, min: 10, max: 60 }
   },
   _getStore() {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '{}'); } catch { return {}; }
   },
   _save(store) { localStorage.setItem(this.KEY, JSON.stringify(store)); },
   getHoldings() { return this._getStore().holdings || { shortTerm: [], longTerm: [], bond: [] }; },
+  getTotalCapital() {
+    const s = this._getStore();
+    return s.totalCapital || 0;
+  },
+  setTotalCapital(amount) {
+    const s = this._getStore();
+    s.totalCapital = amount;
+    this._save(s);
+  },
   getAllocation() {
     const s = this._getStore();
-    return s.allocation || { shortTerm: 30, longTerm: 50, bond: 20 };
+    return s.allocation || { shortTerm: 20, longTerm: 50, bond: 30 };
   },
   setAllocation(alloc) {
     const s = this._getStore();
@@ -6731,10 +6741,10 @@ const PortfolioLayer = {
 const RegimeAllocator = {
   // Regime detection based on S&P 500 moving averages
   ALLOC_MAP: {
-    bull:     { shortTerm: 35, longTerm: 50, bond: 15 },
-    bear:     { shortTerm: 15, longTerm: 35, bond: 50 },
-    sideways: { shortTerm: 30, longTerm: 45, bond: 25 },
-    crisis:   { shortTerm: 10, longTerm: 25, bond: 65 }
+    bull:     { shortTerm: 20, longTerm: 70, bond: 10 },
+    bear:     { shortTerm: 25, longTerm: 20, bond: 55 },
+    sideways: { shortTerm: 40, longTerm: 40, bond: 20 },
+    crisis:   { shortTerm: 10, longTerm: 15, bond: 75 }
   },
   async detectRegime() {
     try {
@@ -6787,12 +6797,13 @@ const RegimeAllocator = {
   }
 };
 
-// ③ Long-Term Stock Engine — 基本面 + 估值 + 趨勢評分
+// ③ Long-Term Decision Engine — 成長性×估值×品質×趨勢×市場地位 → 決策
 const LongTermStockEngine = {
   UNIVERSE: {
     us: ['AAPL','MSFT','GOOGL','AMZN','NVDA','META','TSLA','BRK-B','UNH','JNJ','V','MA','PG','HD','XOM','CVX','KO','PEP','ABBV','MRK','LLY','AVGO','COST','WMT','CRM','ACN','MCD','ABT','TXN','NEE','DHR','PM','UPS','LOW','BA','CAT','HON','GE','INTC','AMD'],
     tw: ['2330.TW','2317.TW','2454.TW','2412.TW','2308.TW','1301.TW','1303.TW','2882.TW','2881.TW','2884.TW','2891.TW','3711.TW','2303.TW','2886.TW','2357.TW','2382.TW','1216.TW','2002.TW','1326.TW','5880.TW']
   },
+  // New 5-factor scoring: growth(30) + valuation(25) + quality(20) + trend(15) + position(10) = 100
   async scoreStock(ticker) {
     try {
       const [chartData, fundData] = await Promise.all([
@@ -6802,8 +6813,6 @@ const LongTermStockEngine = {
       if (!chartData || !chartData.closes || chartData.closes.length < 50) return null;
       const closes = chartData.closes;
       const price = closes[closes.length - 1];
-      // === Fundamental Score (0-35) ===
-      let fundScore = 0;
       const pe = fundData.pe || 0;
       const pb = fundData.pb || 0;
       const divYield = fundData.dividendYield || 0;
@@ -6811,161 +6820,186 @@ const LongTermStockEngine = {
       const debtEquity = fundData.debtEquity || 0;
       const revenueGrowth = fundData.revenueGrowth || 0;
       const profitMargin = fundData.profitMargin || 0;
-      // PE ratio (lower is better, up to a point)
-      if (pe > 0 && pe < 10) fundScore += 8;
-      else if (pe >= 10 && pe < 18) fundScore += 6;
-      else if (pe >= 18 && pe < 25) fundScore += 4;
-      else if (pe >= 25 && pe < 35) fundScore += 2;
-      // PB ratio
-      if (pb > 0 && pb < 1.5) fundScore += 5;
-      else if (pb >= 1.5 && pb < 3) fundScore += 3;
-      else if (pb >= 3 && pb < 6) fundScore += 1;
-      // Dividend yield
-      if (divYield >= 4) fundScore += 5;
-      else if (divYield >= 2.5) fundScore += 4;
-      else if (divYield >= 1.5) fundScore += 3;
-      else if (divYield >= 0.5) fundScore += 1;
-      // ROE
-      if (roe >= 25) fundScore += 5;
-      else if (roe >= 18) fundScore += 4;
-      else if (roe >= 12) fundScore += 3;
-      else if (roe >= 8) fundScore += 2;
-      // Debt/Equity (lower better)
-      if (debtEquity >= 0 && debtEquity < 0.3) fundScore += 4;
-      else if (debtEquity < 0.6) fundScore += 3;
-      else if (debtEquity < 1) fundScore += 2;
-      else if (debtEquity < 2) fundScore += 1;
-      // Revenue growth
-      if (revenueGrowth > 20) fundScore += 4;
-      else if (revenueGrowth > 10) fundScore += 3;
-      else if (revenueGrowth > 5) fundScore += 2;
-      else if (revenueGrowth > 0) fundScore += 1;
-      // Profit margin
-      if (profitMargin > 25) fundScore += 4;
-      else if (profitMargin > 15) fundScore += 3;
-      else if (profitMargin > 8) fundScore += 2;
-      else if (profitMargin > 0) fundScore += 1;
-      fundScore = Math.min(35, fundScore);
+      const earningsGrowth = fundData.earningsGrowth || revenueGrowth * 0.8;
+      const marketCap = fundData.marketCap || 0;
 
-      // === Valuation Score (0-30) ===
-      let valScore = 0;
-      // Earnings yield vs 10Y Treasury (~4.5%)
+      // === ① Growth Score (0-100, weight 0.30) ===
+      let growthRaw = 0;
+      if (revenueGrowth > 30) growthRaw += 40;
+      else if (revenueGrowth > 20) growthRaw += 35;
+      else if (revenueGrowth > 10) growthRaw += 25;
+      else if (revenueGrowth > 5) growthRaw += 15;
+      else if (revenueGrowth > 0) growthRaw += 8;
+      if (earningsGrowth > 30) growthRaw += 35;
+      else if (earningsGrowth > 20) growthRaw += 28;
+      else if (earningsGrowth > 10) growthRaw += 20;
+      else if (earningsGrowth > 0) growthRaw += 10;
+      if (divYield > 0 && revenueGrowth > 5) growthRaw += 15; // Growing + paying dividends
+      else if (revenueGrowth > 15) growthRaw += 10; // High growth compensates no dividend
+      growthRaw = Math.min(100, growthRaw);
+
+      // === ② Valuation Score (0-100, weight 0.25) ===
+      let valRaw = 0;
       const earningsYield = pe > 0 ? (1 / pe * 100) : 0;
-      const riskPremium = earningsYield - 4.5;
-      if (riskPremium > 5) valScore += 10;
-      else if (riskPremium > 3) valScore += 8;
-      else if (riskPremium > 1.5) valScore += 5;
-      else if (riskPremium > 0) valScore += 3;
-      // Graham Number approximation
-      const grahamVal = Math.sqrt(Math.abs(22.5 * (pe > 0 ? price / pe : 0) * (pb > 0 ? price / pb : 0)));
-      const grahamDiscount = grahamVal > 0 ? ((grahamVal - price) / grahamVal * 100) : 0;
-      if (grahamDiscount > 30) valScore += 10;
-      else if (grahamDiscount > 15) valScore += 7;
-      else if (grahamDiscount > 5) valScore += 4;
-      else if (grahamDiscount > 0) valScore += 2;
-      // PEG approximation
+      // PE-based
+      if (pe > 0 && pe < 12) valRaw += 30;
+      else if (pe < 18) valRaw += 25;
+      else if (pe < 25) valRaw += 15;
+      else if (pe < 35) valRaw += 8;
+      else valRaw += 0;
+      // PB-based
+      if (pb > 0 && pb < 1.5) valRaw += 25;
+      else if (pb < 3) valRaw += 18;
+      else if (pb < 5) valRaw += 10;
+      else if (pb < 8) valRaw += 5;
+      // PEG
       const peg = (pe > 0 && revenueGrowth > 0) ? pe / (revenueGrowth * 100) : 99;
-      if (peg < 0.5) valScore += 10;
-      else if (peg < 1) valScore += 7;
-      else if (peg < 1.5) valScore += 4;
-      else if (peg < 2) valScore += 2;
-      valScore = Math.min(30, valScore);
+      if (peg > 0 && peg < 0.5) valRaw += 25;
+      else if (peg < 1) valRaw += 20;
+      else if (peg < 1.5) valRaw += 12;
+      else if (peg < 2.5) valRaw += 5;
+      // Earnings yield vs risk-free
+      const riskPremium = earningsYield - 4.5;
+      if (riskPremium > 5) valRaw += 20;
+      else if (riskPremium > 2) valRaw += 12;
+      else if (riskPremium > 0) valRaw += 5;
+      valRaw = Math.min(100, valRaw);
 
-      // === Trend Score (0-35) ===
-      let trendScore = 0;
+      // === ③ Financial Quality Score (0-100, weight 0.20) ===
+      let qualityRaw = 0;
+      if (roe >= 25) qualityRaw += 30;
+      else if (roe >= 18) qualityRaw += 24;
+      else if (roe >= 12) qualityRaw += 16;
+      else if (roe >= 8) qualityRaw += 8;
+      if (profitMargin > 25) qualityRaw += 25;
+      else if (profitMargin > 15) qualityRaw += 18;
+      else if (profitMargin > 8) qualityRaw += 12;
+      else if (profitMargin > 0) qualityRaw += 5;
+      if (debtEquity >= 0 && debtEquity < 0.3) qualityRaw += 25;
+      else if (debtEquity < 0.6) qualityRaw += 18;
+      else if (debtEquity < 1) qualityRaw += 10;
+      else if (debtEquity < 2) qualityRaw += 5;
+      if (divYield >= 3) qualityRaw += 20;
+      else if (divYield >= 2) qualityRaw += 15;
+      else if (divYield >= 1) qualityRaw += 10;
+      else if (divYield > 0) qualityRaw += 5;
+      qualityRaw = Math.min(100, qualityRaw);
+
+      // === ④ Trend Score (0-100, weight 0.15) ===
+      let trendRaw = 0;
       const len = closes.length;
       const ma50 = closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
       const ma200 = len >= 200 ? closes.slice(-200).reduce((a, b) => a + b, 0) / 200 : ma50;
-      // Price above MAs
-      if (price > ma50) trendScore += 5;
-      if (price > ma200) trendScore += 5;
-      if (ma50 > ma200) trendScore += 5; // Golden cross
-      // 52-week position
+      if (price > ma50) trendRaw += 15;
+      if (price > ma200) trendRaw += 15;
+      if (ma50 > ma200) trendRaw += 15;
       const high52 = Math.max(...closes);
       const low52 = Math.min(...closes);
       const range52 = high52 - low52;
       const pctFromHigh = range52 > 0 ? ((price - low52) / range52) : 0.5;
-      if (pctFromHigh > 0.8) trendScore += 5;
-      else if (pctFromHigh > 0.6) trendScore += 4;
-      else if (pctFromHigh > 0.4) trendScore += 2;
-      // Momentum — 6-month return
+      if (pctFromHigh > 0.8) trendRaw += 15;
+      else if (pctFromHigh > 0.6) trendRaw += 10;
+      else if (pctFromHigh > 0.4) trendRaw += 5;
       const mo6 = len >= 126 ? ((price / closes[len - 126]) - 1) * 100 : 0;
-      if (mo6 > 30) trendScore += 5;
-      else if (mo6 > 15) trendScore += 4;
-      else if (mo6 > 5) trendScore += 3;
-      else if (mo6 > 0) trendScore += 1;
-      // Volatility (lower better for long-term)
+      if (mo6 > 20) trendRaw += 20;
+      else if (mo6 > 10) trendRaw += 15;
+      else if (mo6 > 0) trendRaw += 8;
+      else trendRaw += 0;
       const returns = [];
-      for (let i = 1; i < Math.min(len, 60); i++) {
-        returns.push((closes[len - i] / closes[len - i - 1]) - 1);
-      }
+      for (let i = 1; i < Math.min(len, 60); i++) returns.push((closes[len - i] / closes[len - i - 1]) - 1);
       const avgRet = returns.reduce((a, b) => a + b, 0) / returns.length;
       const vol = Math.sqrt(returns.reduce((s, r) => s + (r - avgRet) ** 2, 0) / returns.length) * Math.sqrt(252) * 100;
-      if (vol < 15) trendScore += 5;
-      else if (vol < 25) trendScore += 4;
-      else if (vol < 35) trendScore += 3;
-      else if (vol < 50) trendScore += 1;
-      // RSI in healthy zone
       let gains = 0, losses = 0;
-      for (let i = len - 14; i < len; i++) {
-        const diff = closes[i] - closes[i - 1];
-        if (diff > 0) gains += diff; else losses -= diff;
-      }
+      for (let i = len - 14; i < len; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) gains += d; else losses -= d; }
       const rs = losses === 0 ? 100 : gains / losses;
       const rsi = 100 - 100 / (1 + rs);
-      if (rsi >= 40 && rsi <= 65) trendScore += 5; // healthy
-      else if (rsi >= 30 && rsi <= 70) trendScore += 3;
-      trendScore = Math.min(35, trendScore);
+      if (rsi >= 40 && rsi <= 65) trendRaw += 20;
+      else if (rsi >= 30 && rsi <= 70) trendRaw += 10;
+      trendRaw = Math.min(100, trendRaw);
 
-      const totalScore = fundScore + valScore + trendScore;
+      // === ⑤ Market Position Score (0-100, weight 0.10) ===
+      let positionRaw = 0;
+      if (marketCap > 500e9) positionRaw += 40;       // Mega cap
+      else if (marketCap > 100e9) positionRaw += 30;   // Large cap
+      else if (marketCap > 20e9) positionRaw += 20;    // Mid-large
+      else if (marketCap > 5e9) positionRaw += 10;
+      if (profitMargin > 20 && roe > 15) positionRaw += 30; // Competitive moat proxy
+      else if (profitMargin > 10 && roe > 10) positionRaw += 20;
+      else if (profitMargin > 5) positionRaw += 10;
+      if (divYield > 0 && revenueGrowth > 5) positionRaw += 30; // Sustainable leadership
+      else if (divYield > 0 || revenueGrowth > 10) positionRaw += 15;
+      positionRaw = Math.min(100, positionRaw);
+
+      // === WEIGHTED TOTAL (0-100) ===
+      const totalScore = Math.round(
+        growthRaw * 0.30 + valRaw * 0.25 + qualityRaw * 0.20 + trendRaw * 0.15 + positionRaw * 0.10
+      );
+
+      // === DECISION ENGINE ===
+      // Valuation label
+      let valuation;
+      if (valRaw >= 60) valuation = 'undervalued';
+      else if (valRaw >= 30) valuation = 'fair';
+      else valuation = 'overvalued';
+
+      // Trend label
+      let trend;
+      if (trendRaw >= 60 && price > ma50 && ma50 > ma200) trend = 'bullish';
+      else if (trendRaw < 30 || (price < ma200 && ma50 < ma200)) trend = 'bearish';
+      else trend = 'neutral';
+
+      // Decision: BUY / HOLD / AVOID
+      let decision, decisionReason;
+      if (totalScore >= 65 && valuation !== 'overvalued') {
+        decision = 'BUY';
+        decisionReason = '高品質標的，估值合理，建議買入';
+      } else if (totalScore >= 50 && valuation !== 'overvalued' && trend !== 'bearish') {
+        decision = 'BUY';
+        decisionReason = '品質尚可，趨勢正面，可考慮建倉';
+      } else if (totalScore >= 40 || (valuation === 'undervalued' && qualityRaw >= 40)) {
+        decision = 'HOLD';
+        decisionReason = totalScore >= 40 ? '持有觀望，等待更佳進場點' : '低估但品質一般，觀望為主';
+      } else {
+        decision = 'AVOID';
+        decisionReason = '評分不足或估值過高，建議避開';
+      }
+
+      // Suggested allocation (% of long-term stock bucket)
+      let suggestedAllocation;
+      if (decision === 'BUY' && totalScore >= 75) suggestedAllocation = 10; // max
+      else if (decision === 'BUY' && totalScore >= 65) suggestedAllocation = 7;
+      else if (decision === 'BUY') suggestedAllocation = 5;
+      else suggestedAllocation = 0;
+
+      // Entry strategy
+      const entryStrategies = [];
+      if (trend === 'bullish' && price > ma50) {
+        entryStrategies.push({ type: 'trend_follow', name: '趨勢跟蹤', entry: ma50 * 0.98, stop: ma200 * 0.97, target: price * 1.25, reason: '均線多頭排列，回檔 MA50 進場' });
+      }
+      if (valuation === 'undervalued' && pctFromHigh < 0.7) {
+        entryStrategies.push({ type: 'value_entry', name: '價值進場', entry: price * 0.95, stop: price * 0.85, target: price * 1.30, reason: '低估 + 距高點遠，逢低布局' });
+      }
+      if (decision === 'BUY' && totalScore >= 60) {
+        entryStrategies.push({ type: 'dca', name: '定期定額', entry: price, stop: null, target: null, reason: '高品質標的，每月固定投入' });
+      }
 
       return {
-        ticker, price, totalScore, fundScore, valScore, trendScore,
-        metrics: { pe, pb, divYield, roe, debtEquity, revenueGrowth, profitMargin, earningsYield, peg: peg < 99 ? peg : null, mo6, vol, rsi, ma50, ma200, pctFromHigh },
-        grade: totalScore >= 75 ? 'A' : totalScore >= 60 ? 'B' : totalScore >= 45 ? 'C' : totalScore >= 30 ? 'D' : 'F',
-        recommendation: totalScore >= 70 ? '強力買入' : totalScore >= 55 ? '建議買入' : totalScore >= 40 ? '觀望' : totalScore >= 25 ? '減碼' : '避開'
+        ticker, price, totalScore,
+        scores: { growth: growthRaw, valuation: valRaw, quality: qualityRaw, trend: trendRaw, position: positionRaw },
+        weights: { growth: 0.30, valuation: 0.25, quality: 0.20, trend: 0.15, position: 0.10 },
+        metrics: { pe, pb, divYield, roe, debtEquity, revenueGrowth, profitMargin, earningsYield, peg: peg < 99 ? peg : null, mo6, vol, rsi, ma50, ma200, pctFromHigh, marketCap },
+        // DECISION OUTPUT
+        valuation,
+        trend,
+        decision,
+        decisionReason,
+        suggestedAllocation,
+        entryStrategies,
+        grade: totalScore >= 75 ? 'A' : totalScore >= 60 ? 'B' : totalScore >= 45 ? 'C' : totalScore >= 30 ? 'D' : 'F'
       };
     } catch(e) {
       return null;
     }
-  },
-  // Long-Term Entry Strategy
-  getEntryStrategy(result) {
-    if (!result) return null;
-    const { metrics, totalScore } = result;
-    const strategies = [];
-    // Trend Following Entry
-    if (metrics.ma50 && metrics.ma200 && metrics.ma50 > metrics.ma200 && result.price > metrics.ma50) {
-      strategies.push({
-        type: 'trend_follow', name: '趨勢跟蹤進場',
-        entry: metrics.ma50 * 0.98, // 回檔至 MA50 附近
-        stop: metrics.ma200 * 0.97,
-        target: result.price * 1.25,
-        reason: '均線多頭排列，回檔至 MA50 進場'
-      });
-    }
-    // Value Entry
-    if (totalScore >= 55 && metrics.pctFromHigh < 0.7) {
-      const discountEntry = result.price * 0.95;
-      strategies.push({
-        type: 'value_entry', name: '價值進場',
-        entry: discountEntry,
-        stop: result.price * 0.85,
-        target: result.price * 1.30,
-        reason: '基本面優秀 + 股價低於高點 30%+，逢低布局'
-      });
-    }
-    // DCA for high quality
-    if (totalScore >= 60) {
-      strategies.push({
-        type: 'dca', name: '定期定額',
-        entry: result.price,
-        stop: null,
-        target: null,
-        reason: '高品質標的，建議每月固定金額投入'
-      });
-    }
-    return strategies;
   },
   async scanUniverse(market) {
     const symbols = this.UNIVERSE[market] || this.UNIVERSE.us;
@@ -6977,7 +7011,7 @@ const LongTermStockEngine = {
         try { return await this.scoreStock(t); } catch { return null; }
       }));
       for (const r of batchResults) {
-        if (r) results.push(r);
+        if (r && r.decision) results.push(r); // Enforcement: no decision = no display
       }
     }
     results.sort((a, b) => b.totalScore - a.totalScore);
@@ -6985,7 +7019,39 @@ const LongTermStockEngine = {
   }
 };
 
-// ⑤ Bond Engine — 債券類型 + 收益率 + 久期 + 利率敏感度
+// ④ Position Sizer — 長線倉位控制
+const PositionSizer = {
+  MAX_SINGLE_WEIGHT: 10, // 不超過總資產 10%
+  calcPositionSize(totalCapital, longTermPct, suggestedAllocation, price) {
+    if (!totalCapital || totalCapital <= 0 || !price || price <= 0) return { shares: 0, amount: 0, weight: 0 };
+    const longTermBudget = totalCapital * (longTermPct / 100);
+    const stockBudget = longTermBudget * (suggestedAllocation / 100);
+    const maxByWeight = totalCapital * (this.MAX_SINGLE_WEIGHT / 100);
+    const finalBudget = Math.min(stockBudget, maxByWeight);
+    const shares = Math.floor(finalBudget / price);
+    return {
+      shares,
+      amount: shares * price,
+      weight: totalCapital > 0 ? ((shares * price) / totalCapital * 100) : 0,
+      maxWeight: this.MAX_SINGLE_WEIGHT
+    };
+  },
+  // Allocate across all BUY decisions
+  allocatePortfolio(buyList, totalCapital, longTermPct) {
+    if (!totalCapital || buyList.length === 0) return [];
+    const longTermBudget = totalCapital * (longTermPct / 100);
+    const totalAllocPct = buyList.reduce((s, b) => s + b.suggestedAllocation, 0);
+    // Normalize if over 100%
+    const scale = totalAllocPct > 100 ? 100 / totalAllocPct : 1;
+    return buyList.map(stock => {
+      const adjAlloc = stock.suggestedAllocation * scale;
+      const pos = this.calcPositionSize(totalCapital, longTermPct, adjAlloc, stock.price);
+      return { ...stock, position: pos, adjustedAllocation: adjAlloc };
+    });
+  }
+};
+
+// ⑤ Bond Decision Engine — 每種債券輸出 BUY/REDUCE/HOLD 決策
 const BondEngine = {
   BOND_ETFs: {
     usGov:  { tickers: ['TLT','IEF','SHY','GOVT','BIL'], label: '美國公債', riskLevel: 1 },
@@ -7030,13 +7096,54 @@ const BondEngine = {
       for (const [cat, info] of Object.entries(this.BOND_ETFs)) {
         if (info.tickers.includes(ticker)) { category = cat; break; }
       }
+      const score = this._scoreBond(divYield, duration, vol, ytdReturn, category);
+      const durationType = duration <= 3 ? 'short' : duration <= 8 ? 'mid' : 'long';
       return {
-        ticker, price, divYield, duration, ytdReturn, vol, rateSensitivity, category,
+        ticker, price, divYield, duration, ytdReturn, vol, rateSensitivity, category, durationType,
         label: this.BOND_ETFs[category]?.label || ticker,
         riskLevel: this.BOND_ETFs[category]?.riskLevel || 2,
-        score: this._scoreBond(divYield, duration, vol, ytdReturn, category)
+        score,
+        decision: null, // filled by decideBonds()
+        decisionReason: null,
+        allocation: null
       };
     } catch { return null; }
+  },
+  // Apply rate environment to make bond decisions
+  decideBonds(bonds, rateEnv, regime) {
+    const bondAlloc = this.getBondAllocation(regime, rateEnv);
+    for (const b of bonds) {
+      if (!b) return;
+      // Decision based on rate env + duration + score
+      if (rateEnv === 'rising') {
+        if (b.durationType === 'long') { b.decision = 'REDUCE'; b.decisionReason = '升息環境，長債承壓，減持'; }
+        else if (b.durationType === 'short') { b.decision = 'BUY'; b.decisionReason = '升息環境，短債受惠，加碼'; }
+        else { b.decision = b.score >= 60 ? 'HOLD' : 'REDUCE'; b.decisionReason = '升息環境，中久期觀望'; }
+      } else if (rateEnv === 'falling') {
+        if (b.durationType === 'long') { b.decision = 'BUY'; b.decisionReason = '降息環境，長債受惠，加碼'; }
+        else if (b.durationType === 'short') { b.decision = 'HOLD'; b.decisionReason = '降息環境，短債持有'; }
+        else { b.decision = 'BUY'; b.decisionReason = '降息環境，中久期有利'; }
+      } else {
+        // Stable: score-based
+        if (b.score >= 70) { b.decision = 'BUY'; b.decisionReason = '高評分，穩定期加碼'; }
+        else if (b.score >= 45) { b.decision = 'HOLD'; b.decisionReason = '中等評分，持有觀望'; }
+        else { b.decision = 'REDUCE'; b.decisionReason = '低評分，建議減持'; }
+      }
+      // Override for crisis
+      if (regime === 'crisis' || regime === 'bear') {
+        if (b.category === 'usGov' && b.durationType !== 'long') {
+          b.decision = 'BUY';
+          b.decisionReason = '避險模式，加碼安全資產';
+        }
+        if (b.category === 'hy') {
+          b.decision = 'REDUCE';
+          b.decisionReason = '風險市場，減持高收益債';
+        }
+      }
+      // Allocation from bond bucket
+      b.allocation = bondAlloc[b.category] || 0;
+    }
+    return bonds;
   },
   _scoreBond(divYield, duration, vol, ytdReturn, category) {
     let score = 0;
@@ -7283,77 +7390,111 @@ const LongTermPerformance = {
   }
 };
 
-// ⑨ Portfolio UI Rendering
+// ⑨ Portfolio Decision UI
 let _pfLoaded = false;
 let _pfLoadedAt = 0;
+let _lastPfResult = null; // Cache last result for dashboard
 
 function loadPortfolioPage() {
   const STALE_MS = 120000;
+  // Populate capital input
+  const capInput = document.getElementById('pf-capital-quick');
+  const cap = PortfolioLayer.getTotalCapital();
+  if (capInput && cap > 0) capInput.value = cap;
   if (_pfLoaded && Date.now() - _pfLoadedAt < STALE_MS) return;
-  // show empty state initially
+  if (!cap || cap <= 0) {
+    const emptyEl = document.getElementById('pf-empty');
+    if (emptyEl) {
+      emptyEl.innerHTML = `<div style="font-size:48px;margin-bottom:16px">💼</div>
+        <p style="font-size:16px;margin-bottom:12px">設定總資本後開始配置</p>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:12px">
+          <input id="pf-capital-input" type="number" placeholder="輸入總資本（如 1000000）" style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;width:250px;text-align:center">
+          <select id="pf-capital-currency" style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text)">
+            <option value="USD">USD</option>
+            <option value="TWD">TWD</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="savePfCapital()" style="padding:12px 32px;font-size:16px">確認資本 → 開始配置</button>
+        <p style="font-size:11px;color:var(--muted);margin-top:12px">系統將自動計算：配置比例 → 個股倉位 → 債券配置 → 再平衡</p>`;
+    }
+  }
+}
+
+function savePfCapital() {
+  const input = document.getElementById('pf-capital-input');
+  const val = parseFloat(input?.value) || 0;
+  if (val <= 0) { if (input) input.style.borderColor = 'var(--red)'; return; }
+  const currency = document.getElementById('pf-capital-currency')?.value || 'USD';
+  PortfolioLayer.setTotalCapital(val);
+  const s = PortfolioLayer._getStore();
+  s.currency = currency;
+  PortfolioLayer._save(s);
+  runPortfolioEngine();
 }
 
 async function runPortfolioEngine() {
   const btn = document.getElementById('pf-run-btn');
-  btn.disabled = true; btn.textContent = '分析中...';
+  btn.disabled = true; btn.textContent = '決策中...';
   const emptyEl = document.getElementById('pf-empty');
   if (emptyEl) emptyEl.style.display = 'none';
+  const totalCapital = PortfolioLayer.getTotalCapital();
 
   try {
-    // Phase 1: Market Regime
-    _updatePfStatus('偵測市場環境...');
+    // Phase 1: Market Regime → allocation decision
+    _updatePfStatus('Phase 1/7：偵測市場環境...');
     const regimeResult = await RegimeAllocator.detectRegime();
     const regime = regimeResult.regime;
     const targetAlloc = RegimeAllocator.getAllocation(regime);
 
     // Phase 2: Interest Rate Model
-    _updatePfStatus('分析利率環境...');
+    _updatePfStatus('Phase 2/7：分析利率環境...');
     const rateResult = await InterestRateModel.analyze();
 
-    // Phase 3: Render regime + allocation
-    renderRegimeAllocation(regimeResult, targetAlloc, rateResult);
+    // Phase 3: Render regime decision + allocation pie chart
+    renderRegimeDecision(regimeResult, targetAlloc, rateResult, totalCapital);
 
-    // Phase 4: Long-term stock scan
-    _updatePfStatus('掃描長線標的（美股）...');
+    // Phase 4: Long-term stock decisions
+    _updatePfStatus('Phase 3/7：長線選股決策（美股）...');
     const usStocks = await LongTermStockEngine.scanUniverse('us');
-    _updatePfStatus('掃描長線標的（台股）...');
+    _updatePfStatus('Phase 4/7：長線選股決策（台股）...');
     const twStocks = await LongTermStockEngine.scanUniverse('tw');
-    renderStockRanking(usStocks, twStocks);
+    // Apply position sizing to BUY decisions
+    const usBuys = usStocks.filter(s => s.decision === 'BUY');
+    const twBuys = twStocks.filter(s => s.decision === 'BUY');
+    const usSized = PositionSizer.allocatePortfolio(usBuys, totalCapital, targetAlloc.longTerm);
+    const twSized = PositionSizer.allocatePortfolio(twBuys, totalCapital, targetAlloc.longTerm);
+    renderStockDecisions(usStocks, twStocks, usSized, twSized, totalCapital, targetAlloc);
 
-    // Phase 5: Bond scan
-    _updatePfStatus('掃描債券市場...');
-    const bonds = await BondEngine.scanBonds();
-    const bondAlloc = BondEngine.getBondAllocation(regime, rateResult.env);
-    renderBondPanel(bonds, bondAlloc, rateResult);
+    // Phase 5: Bond decisions
+    _updatePfStatus('Phase 5/7：債券配置決策...');
+    let bonds = await BondEngine.scanBonds();
+    bonds = BondEngine.decideBonds(bonds, rateResult.env, regime);
+    renderBondDecisions(bonds, rateResult, totalCapital, targetAlloc);
 
-    // Phase 6: Rate model panel
+    // Phase 6: Rate model
     renderRateModel(rateResult);
 
-    // Phase 7: Rebalance check
+    // Phase 7: Rebalance + Performance
+    _updatePfStatus('Phase 6/7：再平衡檢查...');
     RebalanceSystem.recordRegime(regime);
     PortfolioLayer.setAllocation(targetAlloc);
     const rebalance = RebalanceSystem.needsRebalance(regime);
     renderRebalancePanel(rebalance, targetAlloc);
-
-    // Phase 8: Performance
-    const perf = LongTermPerformance.getStats();
-    renderPfPerformance(perf);
-
-    // Phase 9: Holdings
+    _updatePfStatus('Phase 7/7：績效追蹤...');
+    renderPfPerformance(LongTermPerformance.getStats());
     renderHoldings();
 
     _pfLoaded = true;
     _pfLoadedAt = Date.now();
     _updatePfStatus('');
 
-    // Snapshot
-    LongTermPerformance.recordSnapshot({
-      totalValue: PortfolioLayer.getTotalValue(),
-      regime, rateEnv: rateResult.env
-    });
+    // Cache for dashboard
+    _lastPfResult = { regime, regimeResult, targetAlloc, rateResult, usBuys: usSized.slice(0, 5), twBuys: twSized.slice(0, 5), bonds: bonds.filter(b => b.decision === 'BUY').slice(0, 3) };
+
+    LongTermPerformance.recordSnapshot({ totalValue: PortfolioLayer.getTotalValue() || totalCapital, regime, rateEnv: rateResult.env });
 
   } catch(e) {
-    _updatePfStatus('分析錯誤: ' + e.message);
+    _updatePfStatus('決策錯誤: ' + e.message);
   } finally {
     btn.disabled = false; btn.textContent = '分析配置';
   }
@@ -7376,115 +7517,234 @@ function _updatePfStatus(msg) {
   }
 }
 
-function renderRegimeAllocation(regimeResult, targetAlloc, rateResult) {
+function renderRegimeDecision(regimeResult, targetAlloc, rateResult, totalCapital) {
   const { regime, confidence, details } = regimeResult;
   const regimeLabel = RegimeAllocator.getRegimeLabel(regime);
   const rateLabel = InterestRateModel.getEnvLabel(rateResult.env);
   const regimeColor = { bull: 'var(--green)', bear: 'var(--red)', sideways: 'var(--yellow)', crisis: 'var(--red)' }[regime] || 'var(--muted)';
+  const stance = { bull: '進攻', bear: '保守', sideways: '均衡', crisis: '全面防禦' }[regime] || '均衡';
+  const stanceColor = { bull: 'var(--green)', bear: 'var(--red)', sideways: 'var(--yellow)', crisis: 'var(--red)' }[regime];
+  const currency = PortfolioLayer._getStore().currency || 'USD';
+  const currSign = currency === 'TWD' ? 'NT$' : '$';
+  const fmt = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'K' : n.toFixed(0);
 
-  let html = `<div class="card" style="margin-bottom:16px">
+  let html = `<div class="card" style="margin-bottom:16px;border-left:4px solid ${stanceColor}">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-      <h3>📡 市場環境 & 動態配置</h3>
-      <div style="display:flex;gap:12px;font-size:13px">
-        <span style="color:${regimeColor};font-weight:600">${regimeLabel} (${(confidence*100).toFixed(0)}%)</span>
-        <span style="color:var(--accent)">${rateLabel} (${(rateResult.confidence*100).toFixed(0)}%)</span>
+      <div>
+        <h3 style="margin-bottom:4px">🎯 資產配置決策</h3>
+        <div style="font-size:20px;font-weight:700;color:${stanceColor}">策略：${stance}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:12px;color:var(--muted)">總資本</div>
+        <div style="font-size:22px;font-weight:700">${currSign}${fmt(totalCapital)}</div>
+        <div style="font-size:11px;color:var(--muted)">${regimeLabel} · ${rateLabel}</div>
       </div>
     </div>`;
-  // Regime details
+
+  // PIE CHART (CSS conic-gradient)
+  const s = targetAlloc.shortTerm, l = targetAlloc.longTerm, b = targetAlloc.bond;
+  html += `<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+    <div style="width:160px;height:160px;border-radius:50%;background:conic-gradient(var(--accent) 0deg ${s*3.6}deg, var(--green) ${s*3.6}deg ${(s+l)*3.6}deg, var(--yellow) ${(s+l)*3.6}deg 360deg);flex-shrink:0;position:relative">
+      <div style="position:absolute;inset:30px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;flex-direction:column">
+        <div style="font-size:11px;color:var(--muted)">配置</div>
+        <div style="font-size:13px;font-weight:700">${stance}</div>
+      </div>
+    </div>
+    <div style="display:grid;gap:8px;flex:1;min-width:200px">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent)">
+        <div style="flex:1"><div style="font-size:12px;color:var(--muted)">短線操盤</div><div style="font-size:18px;font-weight:700">${s}%</div></div>
+        <div style="text-align:right;font-size:13px;font-weight:600">${currSign}${fmt(totalCapital * s / 100)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid var(--green)">
+        <div style="flex:1"><div style="font-size:12px;color:var(--muted)">長線持股</div><div style="font-size:18px;font-weight:700">${l}%</div></div>
+        <div style="text-align:right;font-size:13px;font-weight:600">${currSign}${fmt(totalCapital * l / 100)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid var(--yellow)">
+        <div style="flex:1"><div style="font-size:12px;color:var(--muted)">債券配置</div><div style="font-size:18px;font-weight:700">${b}%</div></div>
+        <div style="text-align:right;font-size:13px;font-weight:600">${currSign}${fmt(totalCapital * b / 100)}</div>
+      </div>
+    </div>
+  </div>`;
+
+  // Market data grid
   if (details.price) {
-    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:16px;font-size:12px">
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">S&P 500</span><br><b>$${details.price.toFixed(0)}</b></div>
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">MA20</span><br><b>$${details.ma20.toFixed(0)}</b></div>
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">MA50</span><br><b>$${details.ma50.toFixed(0)}</b></div>
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">MA200</span><br><b>$${details.ma200.toFixed(0)}</b></div>
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">VIX</span><br><b style="color:${details.vix>25?'var(--red)':'var(--green)'}"> ${details.vix.toFixed(1)}</b></div>
-      <div style="background:var(--bg);padding:8px 12px;border-radius:8px"><span style="color:var(--muted)">RSI</span><br><b>${details.rsi.toFixed(1)}</b></div>
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;font-size:12px">
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">S&P500</span><br><b>$${details.price.toFixed(0)}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">MA20</span><br><b>$${details.ma20.toFixed(0)}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">MA50</span><br><b>$${details.ma50.toFixed(0)}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">MA200</span><br><b>$${details.ma200.toFixed(0)}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">VIX</span><br><b style="color:${details.vix>25?'var(--red)':'var(--green)'}">${details.vix.toFixed(1)}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">RSI</span><br><b>${details.rsi.toFixed(1)}</b></div>
     </div>`;
   }
-  // Target allocation bars
-  html += `<h4 style="margin-bottom:8px;font-size:14px">目標配置</h4>
-    <div style="display:flex;height:32px;border-radius:8px;overflow:hidden;margin-bottom:8px">
-      <div style="width:${targetAlloc.shortTerm}%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff">短線 ${targetAlloc.shortTerm}%</div>
-      <div style="width:${targetAlloc.longTerm}%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff">長線 ${targetAlloc.longTerm}%</div>
-      <div style="width:${targetAlloc.bond}%;background:var(--yellow);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#111">債券 ${targetAlloc.bond}%</div>
-    </div>
-    <p style="font-size:11px;color:var(--muted)">配置依據：${regime === 'bull' ? '牛市加碼股票，減持債券' : regime === 'bear' ? '熊市加碼債券避險，減持股票' : regime === 'crisis' ? '危機模式最大化債券避險' : '盤整市場均衡配置'}</p>
-  </div>`;
+  html += '</div>';
   document.getElementById('pf-regime-alloc').innerHTML = html;
+
+  // Allocation chart area — pie is inline above
+  document.getElementById('pf-allocation-chart').innerHTML = '';
 }
 
-function renderStockRanking(usStocks, twStocks) {
-  const gradeColor = g => ({ A: 'var(--green)', B: '#22d3ee', C: 'var(--yellow)', D: 'var(--red)', F: '#666' }[g] || 'var(--muted)');
-  let html = `<div class="card" style="margin-bottom:16px">
-    <h3 style="margin-bottom:12px">📊 長線選股排名</h3>
+function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targetAlloc) {
+  const decColor = d => ({ BUY: 'var(--green)', HOLD: 'var(--yellow)', AVOID: 'var(--red)' }[d] || 'var(--muted)');
+  const decBg = d => ({ BUY: 'rgba(16,185,129,0.15)', HOLD: 'rgba(245,158,11,0.1)', AVOID: 'rgba(239,68,68,0.1)' }[d] || 'transparent');
+  const valLabel = v => ({ undervalued: '低估', fair: '合理', overvalued: '高估' }[v] || v);
+  const valColor = v => ({ undervalued: 'var(--green)', fair: 'var(--yellow)', overvalued: 'var(--red)' }[v]);
+  const trendLabel = t => ({ bullish: '看漲', neutral: '中性', bearish: '看跌' }[t] || t);
+  const trendColor = t => ({ bullish: 'var(--green)', neutral: 'var(--yellow)', bearish: 'var(--red)' }[t]);
+  const currency = PortfolioLayer._getStore().currency || 'USD';
+  const currSign = currency === 'TWD' ? 'NT$' : '$';
+
+  // BUY ACTION CARDS (top priority)
+  let html = '';
+  if (usSized.length > 0 || twSized.length > 0) {
+    html += `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--green)">
+      <h3 style="margin-bottom:4px">🟢 立即行動：建議買入清單</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">以下標的通過評分+估值+趨勢三重驗證，附帶倉位建議（單一標的不超過總資產 10%）</p>`;
+
+    function renderBuyCards(sized, label) {
+      if (sized.length === 0) return '';
+      let c = `<div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:8px">${label}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;margin-bottom:12px">`;
+      for (const s of sized) {
+        const pos = s.position || {};
+        const entryStr = s.entryStrategies && s.entryStrategies.length > 0 ? s.entryStrategies[0].name : '-';
+        c += `<div style="background:var(--bg);border-radius:8px;padding:12px;border:1px solid rgba(16,185,129,0.3)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div><span style="font-size:16px;font-weight:700">${s.ticker}</span> <span style="font-size:12px;color:var(--muted)">${currSign}${s.price.toFixed(2)}</span></div>
+            <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">BUY</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
+            <div>評分 <b>${s.totalScore}</b>/100 (${s.grade})</div>
+            <div>估值 <span style="color:${valColor(s.valuation)}">${valLabel(s.valuation)}</span></div>
+            <div>趨勢 <span style="color:${trendColor(s.trend)}">${trendLabel(s.trend)}</span></div>
+            <div>進場 <span>${entryStr}</span></div>
+          </div>
+          <div style="background:var(--card);border-radius:6px;padding:8px;font-size:12px">
+            <div style="display:flex;justify-content:space-between">
+              <span style="color:var(--muted)">建議倉位</span>
+              <b>${(s.adjustedAllocation || s.suggestedAllocation).toFixed(1)}%</b>
+            </div>
+            ${totalCapital > 0 ? `<div style="display:flex;justify-content:space-between;margin-top:2px">
+              <span style="color:var(--muted)">買入金額</span>
+              <b>${currSign}${pos.amount ? pos.amount.toFixed(0) : '-'}</b>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:2px">
+              <span style="color:var(--muted)">建議股數</span>
+              <b>${pos.shares || '-'} 股</b>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:2px">
+              <span style="color:var(--muted)">佔總資產</span>
+              <b>${pos.weight ? pos.weight.toFixed(1) : '0'}% / ${pos.maxWeight || 10}%</b>
+            </div>` : ''}
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">${s.decisionReason}</div>
+        </div>`;
+      }
+      c += '</div>';
+      return c;
+    }
+    html += renderBuyCards(usSized, '🇺🇸 美股 BUY');
+    html += renderBuyCards(twSized, '🇹🇼 台股 BUY');
+    html += '</div>';
+  }
+
+  // FULL RANKING TABLE with decisions
+  html += `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">📊 全部標的決策排名</h3>
     <div class="tab-bar" style="margin-bottom:12px">
-      <button class="active" onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('pf-us-stocks').style.display='';document.getElementById('pf-tw-stocks').style.display='none'">🇺🇸 美股 Top 20</button>
-      <button onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('pf-tw-stocks').style.display='';document.getElementById('pf-us-stocks').style.display='none'">🇹🇼 台股 Top 20</button>
+      <button class="active" onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('pf-us-stocks').style.display='';document.getElementById('pf-tw-stocks').style.display='none'">🇺🇸 美股</button>
+      <button onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('pf-tw-stocks').style.display='';document.getElementById('pf-us-stocks').style.display='none'">🇹🇼 台股</button>
     </div>`;
 
-  function renderTable(stocks, id) {
+  function renderDecisionTable(stocks, id) {
     let t = `<div id="${id}" ${id === 'pf-tw-stocks' ? 'style="display:none"' : ''}>
       <div style="overflow-x:auto"><table><thead><tr>
-        <th>#</th><th>代號</th><th>價格</th><th>評級</th><th>總分</th><th>基本面</th><th>估值</th><th>趨勢</th><th>PE</th><th>殖利率</th><th>ROE</th><th>建議</th><th>進場策略</th>
+        <th>決策</th><th>代號</th><th>價格</th><th>總分</th><th>成長</th><th>估值</th><th>品質</th><th>趨勢</th><th>地位</th><th>估值判定</th><th>趨勢判定</th><th>配置%</th>
       </tr></thead><tbody>`;
-    const top = stocks.slice(0, 20);
-    top.forEach((s, i) => {
-      const entries = LongTermStockEngine.getEntryStrategy(s);
-      const entryStr = entries && entries.length > 0 ? entries.map(e => e.name).join(', ') : '-';
-      t += `<tr>
-        <td>${i + 1}</td>
+    for (const s of stocks) {
+      if (!s.decision) return t; // Enforcement: no decision = no display
+      t += `<tr style="background:${decBg(s.decision)}">
+        <td><span style="background:${decColor(s.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${s.decision}</span></td>
         <td><b>${s.ticker}</b></td>
-        <td>$${s.price.toFixed(2)}</td>
-        <td style="color:${gradeColor(s.grade)};font-weight:700;font-size:16px">${s.grade}</td>
-        <td><b>${s.totalScore}</b>/100</td>
-        <td>${s.fundScore}/35</td>
-        <td>${s.valScore}/30</td>
-        <td>${s.trendScore}/35</td>
-        <td>${s.metrics.pe ? s.metrics.pe.toFixed(1) : '-'}</td>
-        <td>${s.metrics.divYield ? s.metrics.divYield.toFixed(2) + '%' : '-'}</td>
-        <td>${s.metrics.roe ? s.metrics.roe.toFixed(1) + '%' : '-'}</td>
-        <td style="color:${s.totalScore >= 55 ? 'var(--green)' : s.totalScore >= 40 ? 'var(--yellow)' : 'var(--red)'}">${s.recommendation}</td>
-        <td style="font-size:11px">${entryStr}</td>
+        <td>${currSign}${s.price.toFixed(2)}</td>
+        <td><b>${s.totalScore}</b></td>
+        <td>${s.scores.growth}</td>
+        <td>${s.scores.valuation}</td>
+        <td>${s.scores.quality}</td>
+        <td>${s.scores.trend}</td>
+        <td>${s.scores.position}</td>
+        <td style="color:${valColor(s.valuation)}">${valLabel(s.valuation)}</td>
+        <td style="color:${trendColor(s.trend)}">${trendLabel(s.trend)}</td>
+        <td style="font-weight:600">${s.suggestedAllocation > 0 ? s.suggestedAllocation + '%' : '-'}</td>
       </tr>`;
-    });
+    }
     t += '</tbody></table></div></div>';
     return t;
   }
-  html += renderTable(usStocks, 'pf-us-stocks');
-  html += renderTable(twStocks, 'pf-tw-stocks');
+  html += renderDecisionTable(usAll, 'pf-us-stocks');
+  html += renderDecisionTable(twAll, 'pf-tw-stocks');
   html += '</div>';
   document.getElementById('pf-stock-ranking').innerHTML = html;
 }
 
-function renderBondPanel(bonds, bondAlloc, rateResult) {
-  let html = `<div class="card" style="margin-bottom:16px">
-    <h3 style="margin-bottom:12px">🏦 債券配置引擎</h3>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:16px">`;
-  for (const [cat, pct] of Object.entries(bondAlloc)) {
-    const label = BondEngine.BOND_ETFs[cat]?.label || cat;
-    const color = { usGov: 'var(--accent)', igCorp: 'var(--green)', hy: 'var(--yellow)', tips: '#a78bfa', intl: '#f97316' }[cat] || 'var(--muted)';
-    html += `<div style="background:var(--bg);padding:12px;border-radius:8px;border-left:3px solid ${color}">
-      <div style="font-size:11px;color:var(--muted)">${label}</div>
-      <div style="font-size:20px;font-weight:700;color:${color}">${pct}%</div>
-    </div>`;
+function renderBondDecisions(bonds, rateResult, totalCapital, targetAlloc) {
+  const decColor = d => ({ BUY: 'var(--green)', HOLD: 'var(--yellow)', REDUCE: 'var(--red)' }[d] || 'var(--muted)');
+  const decBg = d => ({ BUY: 'rgba(16,185,129,0.15)', HOLD: 'rgba(245,158,11,0.1)', REDUCE: 'rgba(239,68,68,0.1)' }[d] || 'transparent');
+  const durLabel = d => ({ short: '短久期', mid: '中久期', long: '長久期' }[d] || d);
+  const currency = PortfolioLayer._getStore().currency || 'USD';
+  const currSign = currency === 'TWD' ? 'NT$' : '$';
+  const bondBudget = totalCapital * (targetAlloc.bond / 100);
+  const fmt = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'K' : n.toFixed(0);
+
+  // BUY action cards first
+  const buyBonds = bonds.filter(b => b.decision === 'BUY');
+  let html = '';
+  if (buyBonds.length > 0) {
+    html += `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--green)">
+      <h3 style="margin-bottom:4px">🏦 債券買入決策</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">債券預算 ${currSign}${fmt(bondBudget)} · 久期建議：${rateResult.durationTarget.label} · ${InterestRateModel.getEnvLabel(rateResult.env)}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:8px">`;
+    for (const b of buyBonds) {
+      const allocAmount = bondBudget * ((b.allocation || 0) / 100);
+      html += `<div style="background:var(--bg);border-radius:8px;padding:12px;border:1px solid rgba(16,185,129,0.3)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:15px;font-weight:700">${b.ticker}</span>
+          <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">BUY</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${b.label} · ${durLabel(b.durationType)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:11px">
+          <div>殖利率 <b style="color:var(--green)">${b.divYield.toFixed(2)}%</b></div>
+          <div>久期 <b>${b.duration.toFixed(1)}年</b></div>
+          <div>配置 <b>${b.allocation || 0}%</b></div>
+          <div>金額 <b>${currSign}${fmt(allocAmount)}</b></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">${b.decisionReason}</div>
+      </div>`;
+    }
+    html += '</div></div>';
   }
-  html += `</div>
-    <p style="font-size:11px;color:var(--muted);margin-bottom:12px">久期建議：${rateResult.durationTarget.label}（${InterestRateModel.getEnvLabel(rateResult.env)}）</p>
+
+  // Full bond table with decisions
+  html += `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">📋 全部債券決策</h3>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>ETF</th><th>類型</th><th>價格</th><th>殖利率</th><th>久期</th><th>年度報酬</th><th>波動率</th><th>利率敏感度</th><th>評分</th>
+      <th>決策</th><th>ETF</th><th>類型</th><th>久期類型</th><th>價格</th><th>殖利率</th><th>久期</th><th>年度報酬</th><th>利率敏感度</th><th>配置%</th><th>評分</th>
     </tr></thead><tbody>`;
   for (const b of bonds) {
+    if (!b.decision) return; // Enforcement
     const senColor = b.rateSensitivity < -8 ? 'var(--red)' : b.rateSensitivity < -4 ? 'var(--yellow)' : 'var(--green)';
-    html += `<tr>
+    html += `<tr style="background:${decBg(b.decision)}">
+      <td><span style="background:${decColor(b.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${b.decision}</span></td>
       <td><b>${b.ticker}</b></td>
       <td style="font-size:11px">${b.label}</td>
-      <td>$${b.price.toFixed(2)}</td>
+      <td style="font-size:11px">${durLabel(b.durationType)}</td>
+      <td>${currSign}${b.price.toFixed(2)}</td>
       <td style="color:var(--green)">${b.divYield.toFixed(2)}%</td>
       <td>${b.duration.toFixed(1)}年</td>
       <td style="color:${b.ytdReturn >= 0 ? 'var(--green)' : 'var(--red)'}">${b.ytdReturn >= 0 ? '+' : ''}${b.ytdReturn.toFixed(2)}%</td>
-      <td>${b.vol.toFixed(1)}%</td>
       <td style="color:${senColor}">${b.rateSensitivity.toFixed(1)}%</td>
-      <td><b>${b.score}</b>/100</td>
+      <td><b>${b.allocation || 0}%</b></td>
+      <td>${b.score}/100</td>
     </tr>`;
   }
   html += '</tbody></table></div></div>';
@@ -7718,27 +7978,29 @@ function exportPortfolioReport() {
   URL.revokeObjectURL(url);
 }
 
-// ⑩ Dashboard Integration — add portfolio summary to dashboard
+// ⑩ Dashboard Integration — portfolio decision summary
 function renderDashPortfolioSummary() {
   const alloc = PortfolioLayer.getAllocation();
-  const totalVal = PortfolioLayer.getTotalValue();
+  const totalCapital = PortfolioLayer.getTotalCapital();
   const drift = PortfolioLayer.getCurrentDrift();
   const perf = LongTermPerformance.getStats();
   const s = JSON.parse(localStorage.getItem('ss_rebalance') || '{}');
   const regime = s.lastRegime || '-';
   const regimeLabel = RegimeAllocator.getRegimeLabel(regime);
+  const stance = { bull: '進攻', bear: '保守', sideways: '均衡', crisis: '全面防禦' }[regime] || '-';
+  const stanceColor = { bull: 'var(--green)', bear: 'var(--red)', sideways: 'var(--yellow)', crisis: 'var(--red)' }[regime] || 'var(--muted)';
   const maxDrift = Math.max(drift.shortTerm, drift.longTerm, drift.bond);
   const needRb = maxDrift > 5;
 
-  let html = `<div class="card" style="margin-top:16px">
+  let html = `<div class="card" style="margin-top:16px;border-left:4px solid ${stanceColor}">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h3>💼 長線配置概覽</h3>
-      <button class="btn btn-ghost btn-sm" onclick="showPage('portfolio')">詳細 →</button>
+      <h3>💼 資產配置決策</h3>
+      <button class="btn btn-ghost btn-sm" onclick="showPage('portfolio')">詳細決策 →</button>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:8px">
       <div style="background:var(--bg);padding:10px;border-radius:8px;text-align:center">
-        <div style="font-size:11px;color:var(--muted)">市場環境</div>
-        <div style="font-size:14px;font-weight:600">${regimeLabel}</div>
+        <div style="font-size:11px;color:var(--muted)">策略</div>
+        <div style="font-size:16px;font-weight:700;color:${stanceColor}">${stance}</div>
       </div>
       <div style="background:var(--bg);padding:10px;border-radius:8px;text-align:center">
         <div style="font-size:11px;color:var(--muted)">配置</div>
@@ -7755,6 +8017,17 @@ function renderDashPortfolioSummary() {
       </div>`;
   }
   html += `</div>`;
+
+  // Show cached BUY decisions from last run
+  if (_lastPfResult && _lastPfResult.usBuys && _lastPfResult.usBuys.length > 0) {
+    html += `<div style="font-size:12px;margin-bottom:4px"><b>長線 BUY 信號：</b></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">`;
+    for (const b of _lastPfResult.usBuys.slice(0, 5)) {
+      html += `<span style="background:rgba(16,185,129,0.15);border:1px solid var(--green);color:var(--green);padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600">${b.ticker} ${b.totalScore}分</span>`;
+    }
+    html += '</div>';
+  }
+
   if (needRb) {
     html += `<div style="font-size:12px;color:var(--red);padding:6px 10px;background:rgba(239,68,68,0.1);border-radius:6px">⚠️ 配置偏移超過閾值，建議再平衡</div>`;
   }
