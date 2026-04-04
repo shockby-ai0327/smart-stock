@@ -25,6 +25,7 @@ body{font-family:-apple-system,'Segoe UI','Noto Sans TC',sans-serif;background:v
 .sidebar nav button{width:100%;padding:12px 20px;background:none;border:none;color:var(--muted);text-align:left;cursor:pointer;font-size:14px;transition:all .2s;display:flex;align-items:center;gap:10px}
 .sidebar nav button:hover{background:rgba(59,130,246,.1);color:var(--text)}
 .sidebar nav button.active{background:rgba(59,130,246,.15);color:var(--accent);border-right:3px solid var(--accent)}
+.sidebar .nav-label{padding:12px 20px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);opacity:.6;margin-top:4px}
 .main{flex:1;overflow-y:auto;padding:24px}
 .page{display:none;opacity:0}.page.active{display:block;animation:fadeIn .25s ease forwards}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
@@ -242,40 +243,91 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
 <body>
 <div class="app">
   <div class="sidebar">
-    <div class="logo">📊 操盤系統</div>
+    <div class="logo" onclick="showPage('home')" style="cursor:pointer">📊 Investment OS</div>
     <nav>
-      <button class="active" onclick="showPage('dashboard')">🎯 今日交易</button>
-      <button onclick="showPage('indices')">🏛️ 大盤</button>
-      <button onclick="showPage('sentiment')">🧠 情緒</button>
-      <button onclick="showPage('industry')">🏭 產業</button>
-      <button onclick="showPage('heatmap')">🔥 熱力圖</button>
-      <button onclick="showPage('scanner')">⚡ 掃描器</button>
-      <button onclick="showPage('stock')">📈 個股分析</button>
-      <button onclick="showPage('news')">📰 新聞</button>
-      <button onclick="showPage('journal')">📝 日誌</button>
+      <button class="active" onclick="showPage('home')">🏠 Home</button>
+      <div class="nav-label">Short-Term</div>
+      <button onclick="showPage('dashboard')">🎯 Trade List</button>
+      <button onclick="showPage('scanner')">⚡ Scanner</button>
+      <button onclick="showPage('backtest')">🔬 Backtest</button>
       <button onclick="showPage('review')">📊 績效</button>
-      <button onclick="showPage('backtest')">🔬 回測</button>
-      <button onclick="showPage('portfolio')">💼 配置</button>
-      <button onclick="showPage('calc')">🧮 試算</button>
+      <div class="nav-label">Long-Term</div>
+      <button onclick="showPage('portfolio')">💼 Allocation</button>
+      <button onclick="showPage('stock')">📈 個股分析</button>
+      <div class="nav-label">Fixed Income</div>
+      <button onclick="showPage('bonds')">🏦 Bonds</button>
+      <div class="nav-label">Crypto</div>
+      <button onclick="showPage('crypto')">₿ Crypto</button>
+      <div class="nav-label">Global</div>
+      <button onclick="showPage('market')">🌍 Market</button>
+      <button onclick="showPage('journal')">📝 Log</button>
+      <button onclick="showPage('calc')">🧮 Tools</button>
     </nav>
   </div>
   <div class="mobile-nav" id="mobile-nav">
-    <button class="active" onclick="showPage('dashboard')">🎯 交易</button>
-    <button onclick="showPage('indices')">🏛️ 大盤</button>
-    <button onclick="showPage('sentiment')">🧠 情緒</button>
-    <button onclick="showPage('industry')">🏭 產業</button>
-    <button onclick="showPage('heatmap')">🔥 熱力</button>
-    <button onclick="showPage('scanner')">⚡ 掃描</button>
+    <button class="active" onclick="showPage('home')">🏠</button>
+    <button onclick="showPage('dashboard')">🎯 短線</button>
+    <button onclick="showPage('portfolio')">💼 長線</button>
+    <button onclick="showPage('bonds')">🏦 債券</button>
+    <button onclick="showPage('crypto')">₿ Crypto</button>
+    <button onclick="showPage('market')">🌍 市場</button>
     <button onclick="showPage('stock')">📈 個股</button>
-    <button onclick="showPage('news')">📰 新聞</button>
     <button onclick="showPage('journal')">📝 日誌</button>
-    <button onclick="showPage('review')">📊 績效</button>
-    <button onclick="showPage('backtest')">🔬 回測</button>
-    <button onclick="showPage('portfolio')">💼 配置</button>
-    <button onclick="showPage('calc')">🧮 試算</button>
   </div>
   <div class="main">
-    <div id="page-dashboard" class="page active">
+    <div id="page-home" class="page active">
+      <div style="text-align:center;padding:30px 20px 20px">
+        <div style="font-size:28px;font-weight:700;margin-bottom:4px">📊 Investment OS</div>
+        <p style="color:var(--muted);font-size:14px;margin-bottom:32px">多策略投資作業系統 — 選擇你的投資模式</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;max-width:900px;margin:0 auto;padding:0 16px">
+        <div class="card" style="cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--border)" onclick="showPage('dashboard')" onmouseenter="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 30px rgba(59,130,246,.15)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
+          <div style="font-size:40px;margin-bottom:12px">🎯</div>
+          <h3 style="margin-bottom:6px;color:var(--accent)">Short-Term Trading</h3>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5">短線操盤系統。掃描 → Edge 驗證 → 決策執行 → 回測驗證。</p>
+          <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,.1);color:var(--accent);border-radius:4px">Trade List</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,.1);color:var(--accent);border-radius:4px">Scanner</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,.1);color:var(--accent);border-radius:4px">Backtest</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(59,130,246,.1);color:var(--accent);border-radius:4px">Edge/EV</span>
+          </div>
+        </div>
+        <div class="card" style="cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--border)" onclick="showPage('portfolio')" onmouseenter="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 30px rgba(16,185,129,.15)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
+          <div style="font-size:40px;margin-bottom:12px">💼</div>
+          <h3 style="margin-bottom:6px;color:var(--green)">Long-Term Investing</h3>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5">長線價值投資。基本面評分 → 決策配置 → 倉位管理 → 再平衡。</p>
+          <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;padding:3px 8px;background:rgba(16,185,129,.1);color:var(--green);border-radius:4px">Ranking</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(16,185,129,.1);color:var(--green);border-radius:4px">Allocation</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(16,185,129,.1);color:var(--green);border-radius:4px">Decision</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(16,185,129,.1);color:var(--green);border-radius:4px">Rebalance</span>
+          </div>
+        </div>
+        <div class="card" style="cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--border)" onclick="showPage('bonds')" onmouseenter="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 30px rgba(245,158,11,.15)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
+          <div style="font-size:40px;margin-bottom:12px">🏦</div>
+          <h3 style="margin-bottom:6px;color:var(--yellow)">Bonds & Fixed Income</h3>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5">債券配置系統。利率模型 → 久期管理 → 決策引擎 → 風險控制。</p>
+          <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;padding:3px 8px;background:rgba(245,158,11,.1);color:var(--yellow);border-radius:4px">Rate Model</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(245,158,11,.1);color:var(--yellow);border-radius:4px">Duration</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(245,158,11,.1);color:var(--yellow);border-radius:4px">Allocation</span>
+          </div>
+        </div>
+        <div class="card" style="cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--border)" onclick="showPage('crypto')" onmouseenter="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 30px rgba(168,85,247,.15)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
+          <div style="font-size:40px;margin-bottom:12px">₿</div>
+          <h3 style="margin-bottom:6px;color:#a855f7">Crypto</h3>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5">加密貨幣系統。波動分析 → 情緒指標 → 資金流向 → 風險管理。</p>
+          <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;padding:3px 8px;background:rgba(168,85,247,.1);color:#a855f7;border-radius:4px">Volatility</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(168,85,247,.1);color:#a855f7;border-radius:4px">Sentiment</span>
+            <span style="font-size:10px;padding:3px 8px;background:rgba(168,85,247,.1);color:#a855f7;border-radius:4px">Flow</span>
+          </div>
+        </div>
+      </div>
+      <div id="home-regime-summary" style="max-width:900px;margin:24px auto 0;padding:0 16px"></div>
+      <div id="home-portfolio-summary" style="max-width:900px;margin:0 auto;padding:0 16px"></div>
+    </div>
+    <div id="page-dashboard" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
         <h2>🎯 今日交易清單</h2>
         <div style="display:flex;gap:8px;align-items:center">
@@ -402,6 +454,51 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
         <p style="font-size:16px;margin-bottom:8px">點擊「分析配置」啟動長線投資引擎</p>
         <p style="font-size:13px">系統將執行：市場環境判定 → 動態資產配置 → 長線選股 → 債券配置 → 利率模型 → 再平衡建議</p>
       </div>
+    </div>
+    <div id="page-bonds" class="page">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <h2>🏦 Bond & Fixed Income System</h2>
+        <button class="btn btn-primary" onclick="runBondSystem()" id="bond-run-btn">分析債券</button>
+      </div>
+      <div id="bond-rate-model"></div>
+      <div id="bond-allocation"></div>
+      <div id="bond-decisions"></div>
+      <div id="bond-duration"></div>
+      <div id="bond-empty" style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:48px;margin-bottom:16px">🏦</div>
+        <p style="font-size:16px;margin-bottom:8px">點擊「分析債券」啟動固定收益系統</p>
+        <p style="font-size:13px">系統將執行：利率環境判定 → 殖利率曲線分析 → 久期配置 → 債券決策</p>
+      </div>
+    </div>
+    <div id="page-crypto" class="page">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <h2>₿ Crypto System</h2>
+        <button class="btn btn-primary" onclick="runCryptoSystem()" id="crypto-run-btn">分析加密貨幣</button>
+      </div>
+      <div id="crypto-volatility"></div>
+      <div id="crypto-sentiment"></div>
+      <div id="crypto-flow"></div>
+      <div id="crypto-decisions"></div>
+      <div id="crypto-empty" style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:48px;margin-bottom:16px">₿</div>
+        <p style="font-size:16px;margin-bottom:8px">點擊「分析加密貨幣」啟動 Crypto 系統</p>
+        <p style="font-size:13px">系統將執行：主流幣波動分析 → 恐懼貪婪指數 → 資金流向 → 風險管理</p>
+      </div>
+    </div>
+    <div id="page-market" class="page">
+      <h2 style="margin-bottom:16px">🌍 Market Overview</h2>
+      <div class="tab-bar" id="market-tabs" style="margin-bottom:16px">
+        <button class="active" onclick="switchMarketTab('indices')">🏛️ 大盤指數</button>
+        <button onclick="switchMarketTab('sentiment')">🧠 情緒</button>
+        <button onclick="switchMarketTab('industry')">🏭 產業</button>
+        <button onclick="switchMarketTab('heatmap')">🔥 熱力圖</button>
+        <button onclick="switchMarketTab('news')">📰 新聞</button>
+      </div>
+      <div id="market-tab-indices"><div id="mkt-indices-content"></div></div>
+      <div id="market-tab-sentiment" style="display:none"><div id="mkt-sentiment-content"></div></div>
+      <div id="market-tab-industry" style="display:none"><div id="mkt-industry-content"></div></div>
+      <div id="market-tab-heatmap" style="display:none"><div id="mkt-heatmap-content"></div></div>
+      <div id="market-tab-news" style="display:none"><div id="mkt-news-content"></div></div>
     </div>
     <div id="page-calc" class="page">
       <h2 style="margin-bottom:20px">股價試算器</h2>
@@ -771,7 +868,7 @@ async function multiChart(symbols) {
 }
 
 // ============ NAVIGATION ============
-const PAGES = ['dashboard', 'indices', 'sentiment', 'industry', 'heatmap', 'scanner', 'stock', 'news', 'journal', 'review', 'backtest', 'portfolio', 'calc'];
+const PAGES = ['home', 'dashboard', 'scanner', 'backtest', 'review', 'portfolio', 'stock', 'bonds', 'crypto', 'market', 'journal', 'calc', 'indices', 'sentiment', 'industry', 'heatmap', 'news'];
 // showPage() is defined near the bottom with URL hash routing support
 
 // ============ STOCK ANALYSIS ============
@@ -825,7 +922,9 @@ async function analyzeStock() {
       const rc = riskControl(ta, va, ud, price);
       const ltEntry = longTermEntry(va, price, c, h, l, ta.atr, ud);
       const stEntry = shortTermEntry(ta, price, c, h, l, ud);
-      rd.innerHTML = renderStock(ticker, meta, ta, va, ltEntry, stEntry, ud, rc, currency, price, change, changePct);
+      const stDec = stockShortTermDecision(ta, ud, stEntry);
+      const ltDec = stockLongTermDecision(ta, va, ud, ltEntry);
+      rd.innerHTML = renderStock(ticker, meta, ta, va, ltEntry, stEntry, ud, rc, currency, price, change, changePct, stDec, ltDec);
     }
     setTimeout(() => renderKline('stock-kline', ohlcv), 50);
   } catch (e) {
@@ -1081,6 +1180,94 @@ function unifiedDecision(ta, va, vixData, stockChgPct) {
   return { signal, totalScore, fundScore, techScore, sentScore, confidence, confLabel, steps, vetoed, sentFactors, topReasons };
 }
 
+// ============ DUAL DECISION ENGINE ============
+// Short-Term Decision: technical-driven (tech 60% + sentiment 30% + momentum 10%)
+function stockShortTermDecision(ta, ud, st) {
+  const techW = 0.60, sentW = 0.30, momW = 0.10;
+  // Momentum from price vs MA5/MA20
+  let momScore = 50;
+  if (ta.ma5 > ta.ma20) momScore += 15;
+  if (ta.ma5 < ta.ma20) momScore -= 15;
+  if (ta.rsi > 50 && ta.rsi < 70) momScore += 10;
+  if (ta.rsi < 50 && ta.rsi > 30) momScore -= 10;
+  if (ta.volRatio > 1.3 && ta.score > 0) momScore += 10;
+  if (ta.volRatio > 1.3 && ta.score < 0) momScore -= 10;
+  momScore = Math.max(0, Math.min(100, momScore));
+
+  const score = Math.round(ud.techScore * techW + ud.sentScore * sentW + momScore * momW);
+  let signal = score >= 62 ? 'BUY' : score <= 38 ? 'SELL' : 'HOLD';
+
+  // Guardrails
+  let reason = '';
+  if (signal === 'BUY' && ta.rsi > 75) { signal = 'HOLD'; reason = 'RSI 超買，暫緩進場'; }
+  if (signal === 'BUY' && ud.techScore <= 20) { signal = 'HOLD'; reason = '技術面嚴重破位'; }
+  if (signal === 'SELL' && ta.rsi < 25) { reason = 'RSI 極度超賣，可能反彈'; }
+  if (ta.score >= 40 && ud.sentScore >= 55) { signal = 'BUY'; reason = '技術+情緒共振偏多'; }
+  if (ta.score <= -40 && ud.sentScore <= 40) { signal = 'SELL'; reason = '技術+情緒共振偏空'; }
+
+  const factors = [];
+  if (ta.sigs.length) factors.push(...ta.sigs.slice(0, 3).map(s => (s.t === 'b' ? '▲ ' : '▼ ') + s.n));
+  if (st.entry) factors.push('進場價 ' + st.entry.toFixed(2));
+  if (st.stop) factors.push('停損 ' + st.stop.toFixed(2));
+
+  const conf = Math.min(100, Math.round(Math.abs(score - 50) * 2.5));
+  return { signal, score, confidence: conf, reason, factors, momScore, entry: st.entry, stop: st.stop, exit: st.exit, rr: st.rr };
+}
+
+// Long-Term Decision: fundamental-driven (fund 60% + quality 25% + trend 15%)
+function stockLongTermDecision(ta, va, ud, lt) {
+  const fundW = 0.60, qualW = 0.25, trendW = 0.15;
+
+  // Quality score from ROE, debt, profit margin
+  let qualScore = 50;
+  if (va.roe != null) {
+    if (va.roe > 20) qualScore += 20;
+    else if (va.roe > 15) qualScore += 12;
+    else if (va.roe < 5) qualScore -= 15;
+  }
+  if (va.debt != null) {
+    if (va.debt < 50) qualScore += 10;
+    else if (va.debt > 150) qualScore -= 15;
+  }
+  if (va.pm != null) {
+    if (va.pm > 20) qualScore += 10;
+    else if (va.pm < 5) qualScore -= 10;
+  }
+  if (va.dy > 3) qualScore += 8;
+  qualScore = Math.max(0, Math.min(100, qualScore));
+
+  // Trend score: is the stock above long-term MAs?
+  let trendScore = 50;
+  if (ta.ma60 && ta.ma20 > ta.ma60) trendScore += 15;
+  if (ta.ma60 && ta.ma20 < ta.ma60) trendScore -= 15;
+  if (ta.ma20 && ta.ma5 > ta.ma20) trendScore += 10;
+  if (ta.ma20 && ta.ma5 < ta.ma20) trendScore -= 10;
+  trendScore = Math.max(0, Math.min(100, trendScore));
+
+  const score = Math.round(ud.fundScore * fundW + qualScore * qualW + trendScore * trendW);
+  let signal = score >= 60 ? 'BUY' : score <= 35 ? 'AVOID' : 'HOLD';
+
+  // Guardrails
+  let reason = '';
+  if (signal === 'BUY' && va.pe != null && va.pe > 60) { signal = 'HOLD'; reason = 'PE 過高，估值風險大'; }
+  if (signal === 'BUY' && ud.fundScore <= 25) { signal = 'HOLD'; reason = '基本面不足以支撐長線買入'; }
+  if (ud.fundScore >= 70 && qualScore >= 60) { signal = 'BUY'; reason = '基本面強+品質優，值得長期持有'; }
+  if (ud.fundScore <= 25 && qualScore <= 35) { signal = 'AVOID'; reason = '基本面差+品質低，建議迴避'; }
+
+  const factors = [];
+  if (va.factors.length) factors.push(...va.factors.slice(0, 3).map(f => (f.i === '+' ? '✓ ' : f.i === '-' ? '✗ ' : '◌ ') + f.n));
+  if (va.upside != null) factors.push('目標價上行 ' + va.upside.toFixed(1) + '%');
+  if (lt.entry) factors.push('佈局價 ' + lt.entry.toFixed(2));
+
+  const conf = Math.min(100, Math.round(Math.abs(score - 50) * 2.5));
+  // Suggested allocation based on score
+  let allocation = 0;
+  if (signal === 'BUY') allocation = score >= 75 ? 8 : score >= 65 ? 5 : 3;
+  else if (signal === 'HOLD') allocation = score >= 50 ? 2 : 0;
+
+  return { signal, score, confidence: conf, reason, factors, qualScore, trendScore, allocation, entry: lt.entry, stop: lt.stop, exit: lt.exit, rr: lt.rr };
+}
+
 // ============ RISK CONTROL ============
 function riskControl(ta, va, ud, price) {
   const factors = [];
@@ -1319,7 +1506,7 @@ function bondShortTermEntry(ta, price, c, h, l) {
 }
 
 // ============ RENDER STOCK ============
-function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP) {
+function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP, stDec, ltDec) {
   const up = chg >= 0, f = (v, d) => v != null ? v.toFixed(d == null ? 2 : d) : 'N/A';
   const fp = v => v != null ? (cur === 'TWD' ? 'NT$' : '$') + f(v, 2) : 'N/A';
   const sigL = { 'strong-buy': '強烈買入', 'buy': '建議買入', 'hold': '觀望持有', 'sell': '建議賣出', 'strong-sell': '強烈賣出' };
@@ -1513,9 +1700,71 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP
     '</div></details>';
 
   // ══════════════════════════════════════════
-  // ASSEMBLE: Decision header → Stock info → Collapsible details
+  // SECTION: Dual Decision Cards (Short-Term + Long-Term)
   // ══════════════════════════════════════════
-  return stockHeader + decisionHeader + detailKline + detailScoring + detailEntry + detailTech + detailFund +
+  const dualDecision = (function() {
+    if (!stDec || !ltDec) return '';
+    const decColor = s => s === 'BUY' ? 'var(--green)' : s === 'SELL' || s === 'AVOID' ? 'var(--red)' : 'var(--yellow)';
+    const decBg = s => s === 'BUY' ? 'rgba(16,185,129,.06)' : s === 'SELL' || s === 'AVOID' ? 'rgba(239,68,68,.06)' : 'rgba(245,158,11,.06)';
+    const decIcon = s => s === 'BUY' ? '🟢' : s === 'SELL' || s === 'AVOID' ? '🔴' : '🟡';
+    const decLabel = s => s === 'BUY' ? '買入' : s === 'SELL' ? '賣出' : s === 'AVOID' ? '迴避' : '觀望';
+    const miniGauge = (label, val) => {
+      const c = val >= 60 ? 'var(--green)' : val <= 40 ? 'var(--red)' : 'var(--yellow)';
+      return '<div style="display:flex;align-items:center;gap:6px;font-size:11px"><span style="color:var(--muted);min-width:32px">' + label + '</span><div style="flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="height:100%;width:' + val + '%;background:' + c + ';border-radius:2px"></div></div><span style="color:' + c + ';font-weight:600;min-width:24px;text-align:right">' + val + '</span></div>';
+    };
+    const factorList = arr => arr.map(f => '<div style="font-size:11px;color:var(--muted);padding:2px 0">• ' + f + '</div>').join('');
+
+    return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">' +
+      // Short-Term Card
+      '<div class="card" style="border:1px solid ' + decColor(stDec.signal) + ';background:' + decBg(stDec.signal) + ';margin:0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">⚡ 短線決策</div>' +
+          '<div style="font-size:11px;color:var(--muted)">信心 ' + stDec.confidence + '%</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+          '<span style="font-size:28px">' + decIcon(stDec.signal) + '</span>' +
+          '<div>' +
+            '<div style="font-size:22px;font-weight:800;color:' + decColor(stDec.signal) + '">' + stDec.signal + '</div>' +
+            '<div style="font-size:12px;color:var(--muted)">' + decLabel(stDec.signal) + ' · 分數 ' + stDec.score + '/100</div>' +
+          '</div>' +
+        '</div>' +
+        (stDec.reason ? '<div style="font-size:11px;padding:4px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:' + decColor(stDec.signal) + ';margin-bottom:8px">⚡ ' + stDec.reason + '</div>' : '') +
+        '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">' +
+          miniGauge('技術', ud.techScore) +
+          miniGauge('情緒', ud.sentScore) +
+          miniGauge('動能', stDec.momScore) +
+        '</div>' +
+        (stDec.factors.length ? '<div style="border-top:1px solid var(--border);padding-top:8px">' + factorList(stDec.factors) + '</div>' : '') +
+      '</div>' +
+      // Long-Term Card
+      '<div class="card" style="border:1px solid ' + decColor(ltDec.signal) + ';background:' + decBg(ltDec.signal) + ';margin:0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted)">💼 長線決策</div>' +
+          '<div style="font-size:11px;color:var(--muted)">信心 ' + ltDec.confidence + '%</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+          '<span style="font-size:28px">' + decIcon(ltDec.signal) + '</span>' +
+          '<div>' +
+            '<div style="font-size:22px;font-weight:800;color:' + decColor(ltDec.signal) + '">' + ltDec.signal + '</div>' +
+            '<div style="font-size:12px;color:var(--muted)">' + decLabel(ltDec.signal) + ' · 分數 ' + ltDec.score + '/100</div>' +
+          '</div>' +
+        '</div>' +
+        (ltDec.reason ? '<div style="font-size:11px;padding:4px 8px;border-radius:4px;background:rgba(255,255,255,.04);color:' + decColor(ltDec.signal) + ';margin-bottom:8px">⚡ ' + ltDec.reason + '</div>' : '') +
+        '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">' +
+          miniGauge('基本', ud.fundScore) +
+          miniGauge('品質', ltDec.qualScore) +
+          miniGauge('趨勢', ltDec.trendScore) +
+        '</div>' +
+        (ltDec.allocation > 0 ? '<div style="font-size:11px;padding:4px 8px;border-radius:4px;background:rgba(59,130,246,.08);color:var(--accent);margin-bottom:8px">💼 建議配置：' + ltDec.allocation + '% 倉位</div>' : '') +
+        (ltDec.factors.length ? '<div style="border-top:1px solid var(--border);padding-top:8px">' + factorList(ltDec.factors) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  })();
+
+  // ══════════════════════════════════════════
+  // ASSEMBLE: Stock info → Dual Decision → Overall → Details
+  // ══════════════════════════════════════════
+  return stockHeader + dualDecision + decisionHeader + detailKline + detailScoring + detailEntry + detailTech + detailFund +
     '<div class="disclaimer">⚠️ 以上分析僅供參考，不構成投資建議。投資有風險，請依自身判斷做出決策。資料來源：Yahoo Finance</div>';
 }
 
@@ -4342,26 +4591,103 @@ document.addEventListener('keydown', (e) => {
 
 // ============ URL HASH ROUTING ============
 function showPage(name) {
+  // Legacy redirects: old pages now live under market tab
+  const legacyMarket = { indices: 'indices', sentiment: 'sentiment', industry: 'industry', heatmap: 'heatmap', news: 'news' };
+  if (legacyMarket[name]) {
+    // Show the market page with the correct tab
+    _currentPage = 'market';
+    history.replaceState(null, '', '#market');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-market').classList.add('active');
+    _highlightNav('market');
+    switchMarketTab(name);
+    return;
+  }
+
   _currentPage = name;
   history.replaceState(null, '', '#' + name);
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.sidebar nav button').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('#mobile-nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
-  const idx = PAGES.indexOf(name);
-  document.querySelectorAll('.sidebar nav button')[idx].classList.add('active');
-  document.querySelectorAll('#mobile-nav button')[idx].classList.add('active');
-  const STALE_MS = 120000; // 2 minutes — show cached data if fresh enough
-  if (name === 'indices') { if (!_idxLoaded || Date.now() - _idxLoadedAt > STALE_MS) loadIndices(); }
-  if (name === 'sentiment') { if (!_sentLoaded || Date.now() - _sentLoadedAt > STALE_MS) loadSentiment(); }
-  if (name === 'news') loadNews('general');
+  const el = document.getElementById('page-' + name);
+  if (el) el.classList.add('active');
+  _highlightNav(name);
+
+  const STALE_MS = 120000;
   if (name === 'journal') renderJournal();
-  if (name === 'industry') loadIndustry('global');
-  if (name === 'heatmap') { if (!_hmLoaded['us'] || Date.now() - (_hmLoadedAt['us']||0) > STALE_MS) loadHeatmap('us'); }
   if (name === 'review') renderReview();
   if (name === 'backtest') loadBacktestPage();
   if (name === 'portfolio') loadPortfolioPage();
   if (name === 'dashboard') loadDashboard();
+  if (name === 'home') loadHomePage();
+  if (name === 'bonds') loadBondsPage();
+  if (name === 'market') switchMarketTab('indices');
+}
+
+function _highlightNav(name) {
+  document.querySelectorAll('.sidebar nav button').forEach(b => {
+    b.classList.remove('active');
+    // Match by onclick content
+    if (b.getAttribute('onclick') === "showPage('" + name + "')") b.classList.add('active');
+  });
+  document.querySelectorAll('#mobile-nav button').forEach(b => {
+    b.classList.remove('active');
+    if (b.getAttribute('onclick') === "showPage('" + name + "')") b.classList.add('active');
+  });
+}
+
+function switchMarketTab(tab) {
+  document.querySelectorAll('#market-tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('[id^="market-tab-"]').forEach(d => d.style.display = 'none');
+  const tabEl = document.getElementById('market-tab-' + tab);
+  if (tabEl) tabEl.style.display = '';
+  // Highlight tab button
+  const btns = document.querySelectorAll('#market-tabs button');
+  const tabMap = ['indices', 'sentiment', 'industry', 'heatmap', 'news'];
+  const idx = tabMap.indexOf(tab);
+  if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
+  // Load data into market tab containers
+  const STALE_MS = 120000;
+  if (tab === 'indices') {
+    const target = document.getElementById('mkt-indices-content');
+    if (!target.innerHTML || Date.now() - (_idxLoadedAt || 0) > STALE_MS) {
+      loadIndices().then(() => {
+        const src = document.getElementById('indices-content');
+        if (src && target) target.innerHTML = src.innerHTML;
+      });
+    }
+  } else if (tab === 'sentiment') {
+    const target = document.getElementById('mkt-sentiment-content');
+    if (!target.innerHTML || Date.now() - (_sentLoadedAt || 0) > STALE_MS) {
+      loadSentiment().then(() => {
+        const src = document.getElementById('sentiment-content');
+        if (src && target) target.innerHTML = src.innerHTML;
+      });
+    }
+  } else if (tab === 'industry') {
+    const target = document.getElementById('mkt-industry-content');
+    if (!target.innerHTML) {
+      loadIndustry('global');
+      setTimeout(() => {
+        const src = document.getElementById('industry-content');
+        if (src && target) target.innerHTML = src.innerHTML;
+      }, 500);
+    }
+  } else if (tab === 'heatmap') {
+    const target = document.getElementById('mkt-heatmap-content');
+    if (!target.innerHTML || Date.now() - ((_hmLoadedAt && _hmLoadedAt['us']) || 0) > STALE_MS) {
+      loadHeatmap('us').then(() => {
+        const src = document.getElementById('heatmap-content');
+        if (src && target) target.innerHTML = src.innerHTML;
+      });
+    }
+  } else if (tab === 'news') {
+    const target = document.getElementById('mkt-news-content');
+    if (!target.innerHTML) {
+      loadNews('general').then(() => {
+        const src = document.getElementById('news-content');
+        if (src && target) target.innerHTML = src.innerHTML;
+      });
+    }
+  }
 }
 
 // ============ LEARNING SYSTEM (Self-Optimization) ============
@@ -8035,12 +8361,328 @@ function renderDashPortfolioSummary() {
   return html;
 }
 
+// ============ HOME PAGE ============
+function loadHomePage() {
+  // Show market regime + portfolio summary on home
+  const s = JSON.parse(localStorage.getItem('ss_rebalance') || '{}');
+  const regime = s.lastRegime;
+  const homeRegime = document.getElementById('home-regime-summary');
+  if (homeRegime && regime) {
+    const regimeLabel = RegimeAllocator.getRegimeLabel(regime);
+    const alloc = PortfolioLayer.getAllocation();
+    const stance = { bull: '進攻', bear: '保守', sideways: '均衡', crisis: '全面防禦' }[regime] || '-';
+    const stanceColor = { bull: 'var(--green)', bear: 'var(--red)', sideways: 'var(--yellow)', crisis: 'var(--red)' }[regime] || 'var(--muted)';
+    homeRegime.innerHTML = `<div class="card" style="border-left:4px solid ${stanceColor}">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><span style="font-size:13px;color:var(--muted)">Market Regime</span><br><span style="font-size:20px;font-weight:700;color:${stanceColor}">${regimeLabel}</span></div>
+        <div><span style="font-size:13px;color:var(--muted)">策略</span><br><span style="font-size:20px;font-weight:700;color:${stanceColor}">${stance}</span></div>
+        <div><span style="font-size:13px;color:var(--muted)">配置</span><br><span style="font-size:14px;font-weight:600">短${alloc.shortTerm}% / 長${alloc.longTerm}% / 債${alloc.bond}%</span></div>
+      </div>
+    </div>`;
+  }
+}
+
+// ============ BONDS SYSTEM (Isolated) ============
+let _bondsLoaded = false;
+function loadBondsPage() {
+  if (_bondsLoaded) return;
+}
+
+async function runBondSystem() {
+  const btn = document.getElementById('bond-run-btn');
+  btn.disabled = true; btn.textContent = '分析中...';
+  const emptyEl = document.getElementById('bond-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    // Phase 1: Interest Rate Model
+    const rateResult = await InterestRateModel.analyze();
+    renderBondRateModel(rateResult);
+
+    // Phase 2: Regime for bond allocation context
+    const regimeResult = await RegimeAllocator.detectRegime();
+
+    // Phase 3: Scan + Decide bonds
+    let bonds = await BondEngine.scanBonds();
+    bonds = BondEngine.decideBonds(bonds, rateResult.env, regimeResult.regime);
+    renderBondSystemDecisions(bonds, rateResult, regimeResult.regime);
+
+    // Phase 4: Duration analysis
+    renderBondDuration(bonds, rateResult);
+
+    _bondsLoaded = true;
+  } catch(e) {
+    document.getElementById('bond-rate-model').innerHTML = `<div class="card" style="color:var(--red)">錯誤: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '分析債券';
+  }
+}
+
+function renderBondRateModel(rateResult) {
+  const envColor = { rising: 'var(--red)', falling: 'var(--green)', stable: 'var(--yellow)' }[rateResult.env] || 'var(--muted)';
+  const curveLabel = { normal: '正常', flattening: '趨平', steepening: '陡峭化' }[rateResult.yieldCurveSignal] || '正常';
+  const inflLabel = { stable: '穩定', rising: '上升', falling: '下降' }[rateResult.inflationSignal] || '穩定';
+  let html = `<div class="card" style="margin-bottom:16px;border-left:4px solid ${envColor}">
+    <h3 style="margin-bottom:12px">📐 Interest Rate Environment</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+      <div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">利率環境</div>
+        <div style="font-size:20px;font-weight:700;color:${envColor}">${InterestRateModel.getEnvLabel(rateResult.env)}</div>
+      </div>
+      <div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">殖利率曲線</div>
+        <div style="font-size:16px;font-weight:600">${curveLabel}</div>
+      </div>
+      <div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">通膨訊號</div>
+        <div style="font-size:16px;font-weight:600">${inflLabel}</div>
+      </div>
+      <div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">久期建議</div>
+        <div style="font-size:14px;font-weight:600">${rateResult.durationTarget.label}</div>
+      </div>
+    </div>`;
+  if (rateResult.details.tltPrice) {
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;margin-top:12px;font-size:12px">
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">TLT</span> <b>$${rateResult.details.tltPrice}</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">1M</span> <b style="color:${parseFloat(rateResult.details.tlt1mReturn)>=0?'var(--green)':'var(--red)'}">${rateResult.details.tlt1mReturn}%</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">3M</span> <b style="color:${parseFloat(rateResult.details.tlt3mReturn)>=0?'var(--green)':'var(--red)'}">${rateResult.details.tlt3mReturn}%</b></div>
+      <div style="background:var(--bg);padding:6px 10px;border-radius:6px"><span style="color:var(--muted)">6M</span> <b style="color:${parseFloat(rateResult.details.tlt6mReturn)>=0?'var(--green)':'var(--red)'}">${rateResult.details.tlt6mReturn}%</b></div>
+    </div>`;
+  }
+  html += `<div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted)">
+    <b>策略：</b>${rateResult.env === 'rising' ? '升息期：短債加碼，長債減持，TIPS 增持。' : rateResult.env === 'falling' ? '降息期：長債加碼，鎖定殖利率，債券價格看漲。' : '利率穩定：中久期均衡配置，平衡收益與風險。'}
+  </div></div>`;
+  document.getElementById('bond-rate-model').innerHTML = html;
+}
+
+function renderBondSystemDecisions(bonds, rateResult, regime) {
+  const decColor = d => ({ BUY: 'var(--green)', HOLD: 'var(--yellow)', REDUCE: 'var(--red)' }[d] || 'var(--muted)');
+  const decBg = d => ({ BUY: 'rgba(16,185,129,0.12)', HOLD: 'rgba(245,158,11,0.08)', REDUCE: 'rgba(239,68,68,0.08)' }[d] || 'transparent');
+  const durLabel = d => ({ short: '短久期', mid: '中久期', long: '長久期' }[d] || d);
+
+  // BUY cards
+  const buys = bonds.filter(b => b.decision === 'BUY');
+  let html = '';
+  if (buys.length > 0) {
+    html += `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--green)">
+      <h3 style="margin-bottom:12px">🟢 買入決策</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">`;
+    for (const b of buys) {
+      html += `<div style="background:var(--bg);border-radius:8px;padding:12px;border:1px solid rgba(16,185,129,0.3)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <b style="font-size:15px">${b.ticker}</b>
+          <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">BUY</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${b.label} · ${durLabel(b.durationType)}</div>
+        <div style="font-size:11px">殖利率 <b style="color:var(--green)">${b.divYield.toFixed(2)}%</b> · 久期 <b>${b.duration.toFixed(1)}Y</b></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">${b.decisionReason}</div>
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Full table
+  html += `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">📋 All Bond Decisions</h3>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>決策</th><th>ETF</th><th>類型</th><th>久期</th><th>殖利率</th><th>年報酬</th><th>敏感度</th><th>評分</th>
+    </tr></thead><tbody>`;
+  for (const b of bonds) {
+    if (!b.decision) continue;
+    html += `<tr style="background:${decBg(b.decision)}">
+      <td><span style="background:${decColor(b.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${b.decision}</span></td>
+      <td><b>${b.ticker}</b></td>
+      <td style="font-size:11px">${b.label}</td>
+      <td>${b.duration.toFixed(1)}Y (${durLabel(b.durationType)})</td>
+      <td style="color:var(--green)">${b.divYield.toFixed(2)}%</td>
+      <td style="color:${b.ytdReturn>=0?'var(--green)':'var(--red)'}">${b.ytdReturn>=0?'+':''}${b.ytdReturn.toFixed(2)}%</td>
+      <td>${b.rateSensitivity.toFixed(1)}%</td>
+      <td>${b.score}/100</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div></div>';
+  document.getElementById('bond-decisions').innerHTML = html;
+}
+
+function renderBondDuration(bonds, rateResult) {
+  const short = bonds.filter(b => b.durationType === 'short');
+  const mid = bonds.filter(b => b.durationType === 'mid');
+  const long = bonds.filter(b => b.durationType === 'long');
+  const avgYield = arr => arr.length ? (arr.reduce((s, b) => s + b.divYield, 0) / arr.length).toFixed(2) : '-';
+  const avgSens = arr => arr.length ? (arr.reduce((s, b) => s + b.rateSensitivity, 0) / arr.length).toFixed(1) : '-';
+  const recommended = rateResult.env === 'rising' ? 'short' : rateResult.env === 'falling' ? 'long' : 'mid';
+  const recColor = t => t === recommended ? 'border:2px solid var(--green)' : '';
+
+  let html = `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">📊 Duration Analysis</h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <div style="background:var(--bg);border-radius:8px;padding:16px;text-align:center;${recColor('short')}">
+        <div style="font-size:12px;color:var(--muted)">短久期 (0-3Y)</div>
+        <div style="font-size:20px;font-weight:700;margin:4px 0">${short.length} 檔</div>
+        <div style="font-size:11px">平均殖利率 <b>${avgYield(short)}%</b></div>
+        <div style="font-size:11px">利率敏感 <b>${avgSens(short)}%</b></div>
+        ${recommended==='short'?'<div style="font-size:10px;color:var(--green);margin-top:4px;font-weight:700">★ 推薦</div>':''}
+      </div>
+      <div style="background:var(--bg);border-radius:8px;padding:16px;text-align:center;${recColor('mid')}">
+        <div style="font-size:12px;color:var(--muted)">中久期 (3-8Y)</div>
+        <div style="font-size:20px;font-weight:700;margin:4px 0">${mid.length} 檔</div>
+        <div style="font-size:11px">平均殖利率 <b>${avgYield(mid)}%</b></div>
+        <div style="font-size:11px">利率敏感 <b>${avgSens(mid)}%</b></div>
+        ${recommended==='mid'?'<div style="font-size:10px;color:var(--green);margin-top:4px;font-weight:700">★ 推薦</div>':''}
+      </div>
+      <div style="background:var(--bg);border-radius:8px;padding:16px;text-align:center;${recColor('long')}">
+        <div style="font-size:12px;color:var(--muted)">長久期 (8Y+)</div>
+        <div style="font-size:20px;font-weight:700;margin:4px 0">${long.length} 檔</div>
+        <div style="font-size:11px">平均殖利率 <b>${avgYield(long)}%</b></div>
+        <div style="font-size:11px">利率敏感 <b>${avgSens(long)}%</b></div>
+        ${recommended==='long'?'<div style="font-size:10px;color:var(--green);margin-top:4px;font-weight:700">★ 推薦</div>':''}
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('bond-duration').innerHTML = html;
+}
+
+// ============ CRYPTO SYSTEM ============
+const CRYPTO_ASSETS = [
+  { ticker: 'BTC-USD', name: 'Bitcoin', symbol: 'BTC' },
+  { ticker: 'ETH-USD', name: 'Ethereum', symbol: 'ETH' },
+  { ticker: 'SOL-USD', name: 'Solana', symbol: 'SOL' },
+  { ticker: 'BNB-USD', name: 'BNB', symbol: 'BNB' },
+  { ticker: 'XRP-USD', name: 'XRP', symbol: 'XRP' },
+  { ticker: 'ADA-USD', name: 'Cardano', symbol: 'ADA' },
+  { ticker: 'AVAX-USD', name: 'Avalanche', symbol: 'AVAX' },
+  { ticker: 'DOGE-USD', name: 'Dogecoin', symbol: 'DOGE' },
+  { ticker: 'DOT-USD', name: 'Polkadot', symbol: 'DOT' },
+  { ticker: 'LINK-USD', name: 'Chainlink', symbol: 'LINK' }
+];
+
+async function runCryptoSystem() {
+  const btn = document.getElementById('crypto-run-btn');
+  btn.disabled = true; btn.textContent = '分析中...';
+  const emptyEl = document.getElementById('crypto-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    const results = [];
+    const BATCH = 5;
+    for (let i = 0; i < CRYPTO_ASSETS.length; i += BATCH) {
+      const batch = CRYPTO_ASSETS.slice(i, i + BATCH);
+      const batchResults = await Promise.all(batch.map(async c => {
+        try {
+          const data = await yfChart(c.ticker, '6mo', '1d');
+          if (!data || !data.closes || data.closes.length < 20) return null;
+          const closes = data.closes;
+          const len = closes.length;
+          const price = closes[len - 1];
+          // Volatility
+          const rets = [];
+          for (let j = 1; j < Math.min(len, 30); j++) rets.push((closes[len - j] / closes[len - j - 1]) - 1);
+          const avgR = rets.reduce((a, b) => a + b, 0) / rets.length;
+          const vol = Math.sqrt(rets.reduce((s, r) => s + (r - avgR) ** 2, 0) / rets.length) * Math.sqrt(365) * 100;
+          // Momentum
+          const mo7d = len >= 7 ? ((price / closes[len - 7]) - 1) * 100 : 0;
+          const mo30d = len >= 30 ? ((price / closes[len - 30]) - 1) * 100 : 0;
+          const mo90d = len >= 90 ? ((price / closes[len - 90]) - 1) * 100 : 0;
+          // RSI
+          let gains = 0, losses = 0;
+          for (let j = len - 14; j < len; j++) { const d = closes[j] - closes[j-1]; if (d > 0) gains += d; else losses -= d; }
+          const rs = losses === 0 ? 100 : gains / losses;
+          const rsi = 100 - 100 / (1 + rs);
+          // Sentiment: RSI + momentum composite
+          let sentiment;
+          if (rsi > 70 && mo7d > 10) sentiment = 'Extreme Greed';
+          else if (rsi > 55 && mo7d > 0) sentiment = 'Greed';
+          else if (rsi < 30 && mo7d < -10) sentiment = 'Extreme Fear';
+          else if (rsi < 45 && mo7d < 0) sentiment = 'Fear';
+          else sentiment = 'Neutral';
+          // Flow proxy: volume trend
+          const vols = data.volumes || [];
+          const recentVol = vols.slice(-5).reduce((a, b) => a + b, 0) / 5;
+          const prevVol = vols.slice(-20, -5).reduce((a, b) => a + b, 0) / 15;
+          const flowSignal = recentVol > prevVol * 1.3 ? 'Inflow' : recentVol < prevVol * 0.7 ? 'Outflow' : 'Neutral';
+          // Decision
+          let decision;
+          if (rsi < 35 && mo30d < -15 && vol < 100) decision = 'BUY';
+          else if (rsi > 70 && mo7d > 15) decision = 'SELL';
+          else if (mo30d > 0 && rsi >= 40 && rsi <= 65) decision = 'HOLD';
+          else decision = 'WAIT';
+
+          return { ...c, price, vol, mo7d, mo30d, mo90d, rsi, sentiment, flowSignal, decision };
+        } catch { return null; }
+      }));
+      for (const r of batchResults) { if (r) results.push(r); }
+    }
+
+    // Render
+    renderCryptoResults(results);
+  } catch(e) {
+    document.getElementById('crypto-volatility').innerHTML = `<div class="card" style="color:var(--red)">錯誤: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '分析加密貨幣';
+  }
+}
+
+function renderCryptoResults(results) {
+  const sentColor = s => ({ 'Extreme Greed': 'var(--red)', 'Greed': '#f97316', 'Neutral': 'var(--yellow)', 'Fear': 'var(--accent)', 'Extreme Fear': 'var(--green)' }[s] || 'var(--muted)');
+  const decColor = d => ({ BUY: 'var(--green)', SELL: 'var(--red)', HOLD: 'var(--yellow)', WAIT: 'var(--muted)' }[d] || 'var(--muted)');
+  const flowColor = f => ({ Inflow: 'var(--green)', Outflow: 'var(--red)', Neutral: 'var(--muted)' }[f]);
+
+  // Volatility panel
+  let html = `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">📊 Volatility & Momentum</h3>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>決策</th><th>幣種</th><th>價格</th><th>7D</th><th>30D</th><th>90D</th><th>Vol(年化)</th><th>RSI</th>
+    </tr></thead><tbody>`;
+  for (const c of results) {
+    html += `<tr>
+      <td><span style="background:${decColor(c.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${c.decision}</span></td>
+      <td><b>${c.symbol}</b> <span style="font-size:11px;color:var(--muted)">${c.name}</span></td>
+      <td>$${c.price >= 1 ? c.price.toFixed(2) : c.price.toFixed(4)}</td>
+      <td style="color:${c.mo7d>=0?'var(--green)':'var(--red)'}">${c.mo7d>=0?'+':''}${c.mo7d.toFixed(1)}%</td>
+      <td style="color:${c.mo30d>=0?'var(--green)':'var(--red)'}">${c.mo30d>=0?'+':''}${c.mo30d.toFixed(1)}%</td>
+      <td style="color:${c.mo90d>=0?'var(--green)':'var(--red)'}">${c.mo90d>=0?'+':''}${c.mo90d.toFixed(1)}%</td>
+      <td style="color:${c.vol>80?'var(--red)':c.vol>50?'var(--yellow)':'var(--green)'}">${c.vol.toFixed(0)}%</td>
+      <td>${c.rsi.toFixed(0)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div></div>';
+  document.getElementById('crypto-volatility').innerHTML = html;
+
+  // Sentiment panel
+  let shtml = `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">🧠 Sentiment</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">`;
+  for (const c of results) {
+    shtml += `<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+      <div style="font-size:14px;font-weight:700">${c.symbol}</div>
+      <div style="font-size:13px;font-weight:600;color:${sentColor(c.sentiment)};margin-top:4px">${c.sentiment}</div>
+      <div style="font-size:11px;color:var(--muted)">RSI ${c.rsi.toFixed(0)}</div>
+    </div>`;
+  }
+  shtml += '</div></div>';
+  document.getElementById('crypto-sentiment').innerHTML = shtml;
+
+  // Flow panel
+  let fhtml = `<div class="card" style="margin-bottom:16px">
+    <h3 style="margin-bottom:12px">💰 Flow Signal</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">`;
+  for (const c of results) {
+    fhtml += `<div style="background:var(--bg);padding:12px;border-radius:8px;text-align:center">
+      <div style="font-size:14px;font-weight:700">${c.symbol}</div>
+      <div style="font-size:13px;font-weight:600;color:${flowColor(c.flowSignal)};margin-top:4px">${c.flowSignal}</div>
+    </div>`;
+  }
+  fhtml += '</div></div>';
+  document.getElementById('crypto-flow').innerHTML = fhtml;
+}
+
 // ============ INIT ============
 document.getElementById('j-date').valueAsDate = new Date();
 // Restore page from URL hash — default to dashboard
 const _initHash = location.hash.slice(1);
 if (PAGES.includes(_initHash)) { showPage(_initHash); }
-else { showPage('dashboard'); }
+else { showPage('home'); }
 window.addEventListener('hashchange', () => {
   const page = location.hash.slice(1);
   if (PAGES.includes(page)) showPage(page);
