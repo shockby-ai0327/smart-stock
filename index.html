@@ -386,16 +386,17 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
         <div class="journal-form">
           <div class="form-group"><label>日期</label><input type="date" id="j-date"></div>
           <div class="form-group"><label>股票代號</label><input id="j-ticker" placeholder="AAPL"></div>
+          <div class="form-group"><label>市場/商品</label><select id="j-market" onchange="updateJournalCostHint()"><option value="us">🇺🇸 美股</option><option value="tw_stock">🇹🇼 台股股票</option><option value="tw_etf">🇹🇼 台股 ETF</option></select></div>
           <div class="form-group"><label>買/賣</label><select id="j-action"><option value="buy">買入</option><option value="sell">賣出</option></select></div>
           <div class="form-group"><label>價格</label><input type="number" id="j-price" step="0.01" placeholder="150.00"></div>
           <div class="form-group"><label>數量</label><input type="number" id="j-qty" placeholder="100"></div>
           <div class="form-group"><label>策略</label><select id="j-strategy"><option value="momentum">🚀 動能突破</option><option value="catalyst">🔥 題材帶動</option><option value="pullback">🔄 回檔反彈</option><option value="gapgo">⚡ 跳空追擊</option><option value="meanrev">🎯 均值回歸</option><option value="swing">波段交易</option><option value="value">價值投資</option><option value="day">當沖</option><option value="other">其他</option></select></div>
-          <div class="form-group"><label>手續費率</label><input type="text" value="買賣各 0.3%（自動計算）" disabled style="color:var(--orange);font-size:12px"></div>
+          <div class="form-group"><label>交易成本</label><input type="text" id="j-cost-hint" value="" disabled style="color:var(--orange);font-size:12px"></div>
           <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="addJournal()">新增紀錄</button></div>
           <div class="form-group full"><label>備註</label><textarea id="j-notes" placeholder="交易理由、觀察..."></textarea></div>
         </div>
       </div>
-      <div class="card"><h3>交易紀錄</h3><div id="journal-stats" style="margin-bottom:16px"></div><div style="overflow-x:auto"><table><thead><tr><th>日期</th><th>代號</th><th>動作</th><th>價格</th><th>數量</th><th>金額</th><th>手續費</th><th>實收/實付</th><th>策略</th><th>備註</th><th></th></tr></thead><tbody id="journal-body"></tbody></table></div><div id="journal-empty" style="text-align:center;padding:30px;color:var(--muted)">尚無交易紀錄</div></div>
+      <div class="card"><h3>交易紀錄</h3><div id="journal-stats" style="margin-bottom:16px"></div><div style="overflow-x:auto"><table><thead><tr><th>日期</th><th>市場</th><th>代號</th><th>動作</th><th>價格</th><th>數量</th><th>金額</th><th>交易成本</th><th>實收/實付</th><th>策略</th><th>備註</th><th></th></tr></thead><tbody id="journal-body"></tbody></table></div><div id="journal-empty" style="text-align:center;padding:30px;color:var(--muted)">尚無交易紀錄</div></div>
     </div>
     <div id="page-backtest" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
@@ -514,6 +515,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <div class="form-group"><label>買入價格</label><input type="number" id="calc-buy" step="0.01" placeholder="買入價"></div>
           <div class="form-group"><label>賣出價格</label><input type="number" id="calc-sell" step="0.01" placeholder="賣出價"></div>
           <div class="form-group" id="calc-fee-group"><label>手續費折扣 <span style="font-size:11px;color:var(--muted)">(台股券商折扣)</span></label><select id="calc-discount"><option value="1">牌價 (0.1425%)</option><option value="0.6">6折 (0.0855%)</option><option value="0.5">5折 (0.07125%)</option><option value="0.38">3.8折 (0.054%)</option><option value="0.28" selected>2.8折 (0.0399%)</option><option value="0.2">2折 (0.0285%)</option><option value="0.15">1.5折 (0.02138%)</option><option value="0">0 (免手續費)</option></select></div>
+          <div class="form-group" id="calc-tw-type-group"><label>台股商品</label><select id="calc-tw-type"><option value="stock">股票 (證交稅 0.3%)</option><option value="etf">ETF (證交稅 0.1%)</option></select></div>
           <div class="form-group" id="calc-us-fee-group" style="display:none"><label>美股手續費率</label><input type="number" id="calc-us-fee" value="0.3" step="0.01" min="0"><span style="font-size:11px;color:var(--muted)">% (買賣各收)</span></div>
           <div class="form-group full" style="margin-top:8px"><button class="btn btn-primary" onclick="calcProfit()" style="width:100%;padding:14px;font-size:16px">計算盈虧</button></div>
         </div>
@@ -578,8 +580,8 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
 <script>
 // ============ PROXY + CACHE + RETRY ============
 const PROXIES = [
-  url => 'https://corsproxy.io/?' + encodeURIComponent(url),
   url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+  url => 'https://corsproxy.io/?' + encodeURIComponent(url),
   url => 'https://cors-anywhere.herokuapp.com/' + url,
 ];
 function PROXY(url) {
@@ -690,6 +692,7 @@ async function pFetch(url, useCache) {
   // Try last successful proxy first, then fall back to others
   const order = [_lastProxyIdx, ...PROXIES.map((_,i)=>i).filter(i=>i!==_lastProxyIdx)];
   let lastErr;
+  const isYahooApi = /query1\.finance\.yahoo\.com/.test(url);
   for (const pi of order) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -699,9 +702,21 @@ async function pFetch(url, useCache) {
           if (t.includes('Too Many Requests')) { await delay(1500 * (attempt + 1)); continue; }
           throw new Error('HTTP ' + r.status);
         }
+        const text = await r.text();
+        const trimmed = text.trim();
+        if (/Request temporary access to the demo server|CORS Anywhere/i.test(text)) {
+          throw new Error('Proxy access required');
+        }
+        if (/Server-side requests are not allowed on your plan|error code:\s*520/i.test(text)) {
+          throw new Error('Proxy upstream blocked');
+        }
+        if (isYahooApi && !trimmed.startsWith('{')) {
+          throw new Error('Proxy returned non-JSON response');
+        }
         _lastProxyIdx = pi; // remember successful proxy
-        if (useCache) { const blob = await r.blob(); const resp = new Response(blob, { headers: r.headers }); DataCache.set('pf:' + url, resp); return resp.clone(); }
-        return r;
+        const resp = new Response(text, { headers: r.headers });
+        if (useCache) { DataCache.set('pf:' + url, resp.clone()); return resp.clone(); }
+        return resp;
       } catch (e) { lastErr = e; if (attempt === 0) await delay(500); }
     }
   }
@@ -737,8 +752,19 @@ async function yfChart(ticker, range, interval) {
   return result;
 }
 
+async function yfQuoteSummary(ticker) {
+  const modules = 'summaryDetail,defaultKeyStatistics,financialData,fundProfile,quoteType';
+  const url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(ticker) + '?modules=' + modules;
+  const r = await pFetch(url, true);
+  const j = await r.json();
+  return j?.quoteSummary?.result?.[0] || null;
+}
+
 async function yfPageFundamentals(ticker) {
   try {
+    // Prefer stable quoteSummary JSON when available.
+    const apiData = await yfQuoteSummary(ticker).catch(() => null);
+    if (apiData) return apiData;
     // Taiwan stocks: use tw.stock.yahoo.com which has different data structure
     if (ticker.endsWith('.TW') || ticker.endsWith('.TWO')) {
       return await twPageFundamentals(ticker);
@@ -1037,6 +1063,10 @@ function valueAnalysis(meta, fund, price) {
   const debt = r(fd.debtToEquity), pm = r(fd.profitMargins) ? r(fd.profitMargins) * 100 : null;
   const rg = r(fd.revenueGrowth) ? r(fd.revenueGrowth) * 100 : null;
   const tp = r(fd.targetMeanPrice), peg = r(ks.pegRatio);
+  const allMetrics = { pe, fpe, pb, dy, roe, debt, pm, rg, tp, peg };
+  const coreMetrics = { pe, pb, roe, pm, rg };
+  const availableMetrics = Object.values(allMetrics).filter(v => v != null).length;
+  const availableCoreMetrics = Object.values(coreMetrics).filter(v => v != null).length;
 
   let score = 0, factors = [];
   if (pe != null) {
@@ -1073,8 +1103,19 @@ function valueAnalysis(meta, fund, price) {
   let upside = null;
   if (tp && price) { upside = ((tp - price) / price) * 100; if (upside > 30) { score += 15; factors.push({ n: '目標價上行空間大(' + upside.toFixed(1) + '%)', i: '+' }); } else if (upside < -10) { score -= 10; factors.push({ n: '目標價下行(' + upside.toFixed(1) + '%)', i: '-' }); } }
   score = Math.max(-100, Math.min(100, score));
+  let dataStatus = 'complete';
+  let dataNote = '';
+  if (availableCoreMetrics === 0) {
+    dataStatus = 'missing';
+    dataNote = '核心基本面資料缺失，暫不提供估值結論';
+  } else if (availableCoreMetrics < 3) {
+    dataStatus = 'partial';
+    dataNote = '核心基本面資料不完整，估值結果需保守解讀';
+  }
   let verdict = score >= 40 ? '嚴重低估 — 強烈建議買入' : score >= 20 ? '相對低估 — 建議逢低買入' : score >= 0 ? '估值合理 — 可持有觀望' : score >= -20 ? '略為高估 — 謹慎操作' : '嚴重高估 — 建議迴避';
-  return { pe, fpe, pb, dy, roe, debt, pm, rg, tp, peg, score, factors, verdict, upside };
+  if (dataStatus === 'missing') verdict = '基本面資料不足 — 暫不提供估值結論';
+  else if (dataStatus === 'partial') verdict = '基本面資料部分缺失 — 估值結論僅供參考';
+  return { pe, fpe, pb, dy, roe, debt, pm, rg, tp, peg, score, factors, verdict, upside, dataStatus, dataNote, availableMetrics, availableCoreMetrics };
 }
 
 // ============ UNIFIED DECISION (3-Dimension 0-100 Scoring) ============
@@ -1086,8 +1127,14 @@ function unifiedDecision(ta, va, vixData, stockChgPct) {
   // ── Dimension 1: 基本面 (0-100) ──
   // Convert va.score [-100,100] → [0,100]
   const fundRaw = Math.round((va.score + 100) / 2);
-  const fundScore = Math.max(0, Math.min(100, fundRaw));
-  const fundLabel = fundScore >= 70 ? '基本面強勁' : fundScore >= 50 ? '基本面中性' : fundScore >= 30 ? '基本面偏弱' : '基本面不佳';
+  let fundScore = Math.max(0, Math.min(100, fundRaw));
+  if (va.dataStatus === 'missing') fundScore = 35;
+  else if (va.dataStatus === 'partial') fundScore = Math.min(55, Math.max(40, fundScore));
+  const fundLabel = va.dataStatus === 'missing'
+    ? '基本面資料不足'
+    : va.dataStatus === 'partial'
+      ? '基本面資料部分缺失'
+      : fundScore >= 70 ? '基本面強勁' : fundScore >= 50 ? '基本面中性' : fundScore >= 30 ? '基本面偏弱' : '基本面不佳';
   steps.push({ label:'基本面', detail: fundLabel + '（PE/PB/ROE/殖利率/成長性）', value: fundScore, weight: '40%' });
 
   // ── Dimension 2: 技術面 (0-100) ──
@@ -1142,11 +1189,15 @@ function unifiedDecision(ta, va, vixData, stockChgPct) {
   if (signal === 'buy' && techScore <= 15) {
     signal = 'hold'; vetoed = '技術面嚴重破位（≤ 15），否決買入';
   }
-  // C: 三面都強 → 強制買入
-  if (fundScore >= 65 && techScore >= 55 && sentScore >= 55) {
+  // C: 基本面資料不完整不可直接買
+  if (signal === 'buy' && va.dataStatus !== 'complete') {
+    signal = 'hold'; vetoed = '基本面資料不完整，暫不確認買入';
+  }
+  // D: 三面都強 → 強制買入
+  if (va.dataStatus === 'complete' && fundScore >= 65 && techScore >= 55 && sentScore >= 55) {
     signal = 'buy'; vetoed = '三維度均偏多，確認買入';
   }
-  // D: 三面都弱 → 強制賣出
+  // E: 三面都弱 → 強制賣出
   if (fundScore <= 35 && techScore <= 40 && sentScore <= 40) {
     signal = 'sell'; vetoed = '三維度均偏空，確認賣出';
   }
@@ -1154,13 +1205,16 @@ function unifiedDecision(ta, va, vixData, stockChgPct) {
 
   // ── Confidence ──
   const distFromCenter = Math.abs(totalScore - 50);
-  const confidence = Math.min(100, Math.round(distFromCenter * 2.5));
+  let confidence = Math.min(100, Math.round(distFromCenter * 2.5));
+  if (va.dataStatus === 'partial') confidence = Math.round(confidence * 0.85);
+  if (va.dataStatus === 'missing') confidence = Math.round(confidence * 0.7);
   const confLabel = confidence >= 70 ? '高' : confidence >= 40 ? '中等' : '低';
 
   // ── Top 3 reasons (for 10-second decision header) ──
   const topReasons = [];
   // Priority 1: guardrail veto
   if (vetoed) topReasons.push('⚡ ' + vetoed);
+  if (va.dataStatus !== 'complete' && va.dataNote) topReasons.push('⚠️ ' + va.dataNote);
   // Collect scored reasons from all dimensions
   const scored = [];
   // Value factors: '+' is positive, '-' is negative
@@ -1268,10 +1322,12 @@ function stockLongTermDecision(ta, va, ud, lt) {
 
   // Guardrails
   let reason = '';
+  if (signal === 'BUY' && va.dataStatus !== 'complete') { signal = 'HOLD'; reason = '基本面資料不足，暫不建議長線買入'; }
   if (signal === 'BUY' && va.pe != null && va.pe > 60) { signal = 'HOLD'; reason = 'PE 過高，估值風險大'; }
   if (signal === 'BUY' && ud.fundScore <= 25) { signal = 'HOLD'; reason = '基本面不足以支撐長線買入'; }
   if (ud.fundScore >= 70 && qualScore >= 60) { signal = 'BUY'; reason = '基本面強+品質優，值得長期持有'; }
   if (ud.fundScore <= 25 && qualScore <= 35) { signal = 'AVOID'; reason = '基本面差+品質低，建議迴避'; }
+  if (va.dataStatus !== 'complete' && signal === 'BUY') { signal = 'HOLD'; reason = '基本面資料不足，長線決策改為觀望'; }
 
   const factors = [];
   if (va.factors.length) factors.push(...va.factors.slice(0, 3).map(f => (f.i === '+' ? '✓ ' : f.i === '-' ? '✗ ' : '◌ ') + f.n));
@@ -1534,6 +1590,9 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP
   const tagC = i => i === '+' ? 'rgba(16,185,129,.15);color:var(--green)' : i === '-' ? 'rgba(239,68,68,.15);color:var(--red)' : 'rgba(245,158,11,.15);color:var(--yellow)';
   const tagI = i => i === '+' ? '✓' : i === '-' ? '✗' : '◌';
   const reasonList = arr => arr.length ? '<div style="margin-top:10px;font-size:12px;line-height:1.8">' + arr.map(r => '<div style="color:var(--muted)">• ' + r + '</div>').join('') + '</div>' : '';
+  const fundWarning = va.dataStatus !== 'complete'
+    ? '<div class="card" style="border-left:4px solid var(--yellow);background:rgba(245,158,11,.08)"><h3 style="color:var(--yellow)">資料提醒</h3><div style="font-size:13px;line-height:1.7;color:var(--text)">' + (va.dataNote || '基本面資料不完整，請保守解讀') + '</div></div>'
+    : '';
 
   // ── Decision colors ──
   const udColor = ud.signal === 'buy' ? 'var(--green)' : ud.signal === 'sell' ? 'var(--red)' : 'var(--yellow)';
@@ -1703,6 +1762,7 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP
   // Detail: Fundamental indicators + value factors
   const detailFund =
     '<details class="detail-section"><summary class="detail-summary">💎 基本面分析（' + va.verdict + '）</summary><div class="detail-body">' +
+    (va.dataStatus !== 'complete' ? '<div style="margin:12px 0;padding:10px 12px;border-radius:8px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);font-size:12px;color:var(--yellow)">' + va.dataNote + '</div>' : '') +
     '<div class="table-wrap"><table>' +
     '<tr><td style="color:var(--muted)">本益比(PE)</td><td><b>' + (va.pe ? f(va.pe, 1) : 'N/A') + '</b></td></tr>' +
     '<tr><td style="color:var(--muted)">預估PE</td><td><b>' + (va.fpe ? f(va.fpe, 1) : 'N/A') + '</b></td></tr>' +
@@ -1783,7 +1843,7 @@ function renderStock(ticker, meta, ta, va, lt, st, ud, rc, cur, price, chg, chgP
   // ══════════════════════════════════════════
   // ASSEMBLE: Stock info → Dual Decision → Overall → Details
   // ══════════════════════════════════════════
-  return stockHeader + dualDecision + decisionHeader + detailKline + detailScoring + detailEntry + detailTech + detailFund +
+  return stockHeader + fundWarning + dualDecision + decisionHeader + detailKline + detailScoring + detailEntry + detailTech + detailFund +
     '<div class="disclaimer">⚠️ 以上分析僅供參考，不構成投資建議。投資有風險，請依自身判斷做出決策。資料來源：Yahoo Finance</div>';
 }
 
@@ -2182,13 +2242,48 @@ function newsAnalysis(it) {
 }
 
 // ============ JOURNAL ============
-const FEE = 0.003;
+const JOURNAL_MARKETS = {
+  us: { label: '美股', feeRate: 0.003, minFee: 0, sellTaxRate: 0, currency: 'USD' },
+  tw_stock: { label: '台股股票', feeRate: 0.001425, minFee: 20, sellTaxRate: 0.003, currency: 'TWD' },
+  tw_etf: { label: '台股 ETF', feeRate: 0.001425, minFee: 20, sellTaxRate: 0.001, currency: 'TWD' }
+};
+function inferJournalMarket(ticker, market) {
+  if (market && JOURNAL_MARKETS[market]) return market;
+  return /\.TW$|\.TWO$|^\d{4,6}$/.test((ticker || '').toUpperCase()) ? 'tw_stock' : 'us';
+}
+function getJournalMarketConfig(market) {
+  return JOURNAL_MARKETS[inferJournalMarket('', market)] || JOURNAL_MARKETS.us;
+}
+function formatJournalMoney(v, market, digits) {
+  const cfg = getJournalMarketConfig(market);
+  const prefix = cfg.currency === 'TWD' ? 'NT$' : '$';
+  return prefix + v.toLocaleString(undefined, { minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0 });
+}
+function calcJournalCosts(amount, action, market) {
+  const cfg = getJournalMarketConfig(market);
+  const fee = cfg.feeRate > 0 ? Math.max(amount * cfg.feeRate, cfg.minFee || 0) : 0;
+  const tax = action === 'sell' ? amount * cfg.sellTaxRate : 0;
+  const cost = fee + tax;
+  const net = action === 'buy' ? amount + cost : amount - cost;
+  return { fee, tax, cost, net, cfg };
+}
+function updateJournalCostHint() {
+  const market = document.getElementById('j-market')?.value || 'us';
+  const hint = document.getElementById('j-cost-hint');
+  if (!hint) return;
+  const cfg = getJournalMarketConfig(market);
+  if (market === 'us') hint.value = '美股：買賣各 0.3%（可自行調整成本假設）';
+  else hint.value = cfg.label + '：手續費 0.1425% + 最低 NT$20，賣出稅率 ' + (cfg.sellTaxRate * 100).toFixed(1) + '%';
+}
 function getJ() { return JSON.parse(localStorage.getItem('stock-journal') || '[]'); }
 function saveJ(d) { localStorage.setItem('stock-journal', JSON.stringify(d)); }
 function addJournal() {
-  const e = { id: Date.now(), date: document.getElementById('j-date').value, ticker: document.getElementById('j-ticker').value.toUpperCase(), action: document.getElementById('j-action').value, price: parseFloat(document.getElementById('j-price').value), qty: parseInt(document.getElementById('j-qty').value), strategy: document.getElementById('j-strategy').value, notes: document.getElementById('j-notes').value };
+  const e = { id: Date.now(), date: document.getElementById('j-date').value, ticker: document.getElementById('j-ticker').value.toUpperCase(), market: document.getElementById('j-market').value, action: document.getElementById('j-action').value, price: parseFloat(document.getElementById('j-price').value), qty: parseInt(document.getElementById('j-qty').value), strategy: document.getElementById('j-strategy').value, notes: document.getElementById('j-notes').value };
   if (!e.date || !e.ticker || !e.price || !e.qty) { alert('請填寫完整資料'); return; }
-  e.amount = e.price * e.qty; e.fee = e.amount * FEE; e.net = e.action === 'buy' ? e.amount + e.fee : e.amount - e.fee;
+  e.market = inferJournalMarket(e.ticker, e.market);
+  e.amount = e.price * e.qty;
+  const costs = calcJournalCosts(e.amount, e.action, e.market);
+  e.fee = costs.fee; e.tax = costs.tax; e.cost = costs.cost; e.net = costs.net;
   const j = getJ(); j.unshift(e); saveJ(j);
   document.getElementById('j-ticker').value = ''; document.getElementById('j-price').value = ''; document.getElementById('j-qty').value = ''; document.getElementById('j-notes').value = '';
   renderJournal();
@@ -2198,10 +2293,11 @@ function exportJournalCSV() {
   const j = getJ();
   if (!j.length) { alert('沒有交易紀錄可匯出'); return; }
   const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他' };
-  const header = '日期,代號,動作,價格,數量,金額,手續費,實收實付,策略,備註';
+  const header = '日期,市場,代號,動作,價格,數量,金額,交易成本,實收實付,策略,備註';
   const rows = j.map(e => {
-    if (!e.fee) { e.amount = e.price * e.qty; e.fee = e.amount * FEE; e.net = e.action === 'buy' ? e.amount + e.fee : e.amount - e.fee; }
-    return [e.date, e.ticker, e.action === 'buy' ? '買入' : '賣出', e.price, e.qty, e.amount.toFixed(0), e.fee.toFixed(0), e.net.toFixed(0), sl[e.strategy] || e.strategy, '"' + (e.notes || '').replace(/"/g, '""') + '"'].join(',');
+    e.market = inferJournalMarket(e.ticker, e.market);
+    if (e.amount == null || e.cost == null) { e.amount = e.price * e.qty; const costs = calcJournalCosts(e.amount, e.action, e.market); e.fee = costs.fee; e.tax = costs.tax; e.cost = costs.cost; e.net = costs.net; }
+    return [e.date, getJournalMarketConfig(e.market).label, e.ticker, e.action === 'buy' ? '買入' : '賣出', e.price, e.qty, e.amount.toFixed(0), e.cost.toFixed(0), e.net.toFixed(0), sl[e.strategy] || e.strategy, '"' + (e.notes || '').replace(/"/g, '""') + '"'].join(',');
   });
   const csv = '\uFEFF' + header + '\n' + rows.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -2215,13 +2311,42 @@ function renderJournal() {
   const j = getJ(), tb = document.getElementById('journal-body'), emp = document.getElementById('journal-empty'), st = document.getElementById('journal-stats');
   if (!j.length) { tb.innerHTML = ''; emp.style.display = 'block'; st.innerHTML = ''; return; }
   emp.style.display = 'none';
-  j.forEach(e => { if (!e.fee) { e.amount = e.price * e.qty; e.fee = e.amount * FEE; e.net = e.action === 'buy' ? e.amount + e.fee : e.amount - e.fee; } });
-  const tBuy = j.filter(e => e.action === 'buy').reduce((s, e) => s + e.net, 0);
-  const tSell = j.filter(e => e.action === 'sell').reduce((s, e) => s + e.net, 0);
-  const tFee = j.reduce((s, e) => s + (e.fee || 0), 0), pnl = tSell - tBuy;
+  j.forEach(e => {
+    e.market = inferJournalMarket(e.ticker, e.market);
+    if (e.amount == null || e.cost == null) {
+      e.amount = e.price * e.qty;
+      const costs = calcJournalCosts(e.amount, e.action, e.market);
+      e.fee = costs.fee; e.tax = costs.tax; e.cost = costs.cost; e.net = costs.net;
+    }
+  });
   const sl = { value: '價值投資', swing: '波段交易', day: '當沖', other: '其他' };
-  st.innerHTML = '<div style="display:flex;gap:20px;flex-wrap:wrap"><div><span style="color:var(--muted)">總交易:</span> <b>' + j.length + '</b></div><div><span style="color:var(--muted)">總買入(含手續費):</span> <b style="color:var(--green)">$' + tBuy.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</b></div><div><span style="color:var(--muted)">總賣出(扣手續費):</span> <b style="color:var(--red)">$' + tSell.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</b></div><div><span style="color:var(--muted)">累計手續費:</span> <b style="color:var(--orange)">$' + tFee.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</b></div><div><span style="color:var(--muted)">已實現損益:</span> <b style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">$' + pnl.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</b></div></div>';
-  tb.innerHTML = j.map(e => '<tr><td>' + e.date + '</td><td><b>' + e.ticker + '</b></td><td><span class="tag" style="background:' + (e.action === 'buy' ? 'rgba(16,185,129,.15);color:var(--green)' : 'rgba(239,68,68,.15);color:var(--red)') + '">' + (e.action === 'buy' ? '買入' : '賣出') + '</span></td><td>' + e.price.toFixed(2) + '</td><td>' + e.qty + '</td><td>$' + e.amount.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</td><td style="color:var(--orange)">$' + e.fee.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' <span style="font-size:10px">(0.3%)</span></td><td style="font-weight:600;color:' + (e.action === 'buy' ? 'var(--red)' : 'var(--green)') + '">$' + e.net.toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</td><td><span class="tag" style="background:rgba(59,130,246,.1);color:var(--accent)">' + (sl[e.strategy] || e.strategy) + '</span></td><td style="max-width:120px;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (e.notes || '') + '</td><td><button class="btn btn-danger btn-sm" onclick="delJ(' + e.id + ')">刪</button></td></tr>').join('');
+  const grouped = j.reduce((acc, e) => {
+    const cur = getJournalMarketConfig(e.market).currency;
+    if (!acc[cur]) acc[cur] = { buy: 0, sell: 0, cost: 0 };
+    if (e.action === 'buy') acc[cur].buy += e.net;
+    else acc[cur].sell += e.net;
+    acc[cur].cost += e.cost || 0;
+    return acc;
+  }, {});
+  let statsHtml = '<div style="display:flex;gap:20px;flex-wrap:wrap"><div><span style="color:var(--muted)">總交易:</span> <b>' + j.length + '</b></div>';
+  Object.entries(grouped).forEach(([cur, totals]) => {
+    const marketKey = cur === 'TWD' ? 'tw_stock' : 'us';
+    const pnl = totals.sell - totals.buy;
+    statsHtml += '<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;min-width:220px">' +
+      '<div style="font-size:12px;color:var(--accent);margin-bottom:6px">' + cur + '</div>' +
+      '<div style="font-size:12px;color:var(--muted)">總買入(含成本) <b style="color:var(--green)">' + formatJournalMoney(totals.buy, marketKey) + '</b></div>' +
+      '<div style="font-size:12px;color:var(--muted)">總賣出(扣成本) <b style="color:var(--red)">' + formatJournalMoney(totals.sell, marketKey) + '</b></div>' +
+      '<div style="font-size:12px;color:var(--muted)">累計交易成本 <b style="color:var(--orange)">' + formatJournalMoney(totals.cost, marketKey) + '</b></div>' +
+      '<div style="font-size:12px;color:var(--muted)">已實現損益 <b style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (pnl >= 0 ? '+' : '-') + formatJournalMoney(Math.abs(pnl), marketKey) + '</b></div>' +
+      '</div>';
+  });
+  statsHtml += '</div>';
+  st.innerHTML = statsHtml;
+  tb.innerHTML = j.map(e => {
+    const marketLabel = getJournalMarketConfig(e.market).label;
+    const costDetail = e.tax ? '手續費 ' + formatJournalMoney(e.fee, e.market, 2) + ' + 稅 ' + formatJournalMoney(e.tax, e.market, 2) : '手續費 ' + formatJournalMoney(e.fee, e.market, 2);
+    return '<tr><td>' + e.date + '</td><td><span class="tag" style="background:rgba(59,130,246,.1);color:var(--accent)">' + marketLabel + '</span></td><td><b>' + e.ticker + '</b></td><td><span class="tag" style="background:' + (e.action === 'buy' ? 'rgba(16,185,129,.15);color:var(--green)' : 'rgba(239,68,68,.15);color:var(--red)') + '">' + (e.action === 'buy' ? '買入' : '賣出') + '</span></td><td>' + e.price.toFixed(2) + '</td><td>' + e.qty + '</td><td>' + formatJournalMoney(e.amount, e.market, 2) + '</td><td style="color:var(--orange)">' + formatJournalMoney(e.cost, e.market, 2) + '<div style="font-size:10px;color:var(--muted)">' + costDetail + '</div></td><td style="font-weight:600;color:' + (e.action === 'buy' ? 'var(--red)' : 'var(--green)') + '">' + formatJournalMoney(e.net, e.market, 2) + '</td><td><span class="tag" style="background:rgba(59,130,246,.1);color:var(--accent)">' + (sl[e.strategy] || e.strategy) + '</span></td><td style="max-width:120px;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (e.notes || '') + '</td><td><button class="btn btn-danger btn-sm" onclick="delJ(' + e.id + ')">刪</button></td></tr>';
+  }).join('');
 }
 
 // ============ MATH ============
@@ -2237,6 +2362,7 @@ function avg(a) { return a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
 function calcMarketChange() {
   const isTW = document.getElementById('calc-market').value === 'tw';
   document.getElementById('calc-fee-group').style.display = isTW ? '' : 'none';
+  document.getElementById('calc-tw-type-group').style.display = isTW ? '' : 'none';
   document.getElementById('calc-us-fee-group').style.display = isTW ? 'none' : '';
 }
 function calcProfit() {
@@ -2253,10 +2379,12 @@ function calcProfit() {
   const fmt = v => cur + v.toLocaleString(undefined, {minimumFractionDigits: fd, maximumFractionDigits: fd});
   if (market === 'tw') {
     const disc = parseFloat(document.getElementById('calc-discount').value);
+    const twType = document.getElementById('calc-tw-type').value;
     const feeRate = 0.001425 * disc;
+    const taxRate = twType === 'etf' ? 0.001 : 0.003;
     buyFee = Math.max(buyAmt * feeRate, disc > 0 ? 20 : 0);
     sellFee = Math.max(sellAmt * feeRate, disc > 0 ? 20 : 0);
-    sellTax = sellAmt * 0.003;
+    sellTax = sellAmt * taxRate;
     totalCost = buyFee + sellFee + sellTax;
     netProfit = (sellAmt - buyAmt) - totalCost;
     returnPct = ((netProfit) / (buyAmt + buyFee)) * 100;
@@ -2282,12 +2410,12 @@ function calcProfit() {
     '<tr><td style="color:var(--muted)">毛損益</td><td style="text-align:right;color:' + (grossProfit >= 0 ? 'var(--green)' : 'var(--red)') + '"><b>' + (grossProfit >= 0 ? '+' : '') + fmt(grossProfit) + '</b></td></tr>' +
     '<tr style="border-top:2px solid var(--border)"><td style="color:var(--muted)">買入手續費</td><td style="text-align:right"><b>' + fmt(buyFee) + '</b></td></tr>' +
     '<tr><td style="color:var(--muted)">賣出手續費</td><td style="text-align:right"><b>' + fmt(sellFee) + '</b></td></tr>' +
-    (market === 'tw' ? '<tr><td style="color:var(--muted)">證交稅 (0.3%)</td><td style="text-align:right"><b>' + fmt(sellTax) + '</b></td></tr>' : '') +
+    (market === 'tw' ? '<tr><td style="color:var(--muted)">證交稅 (' + ((document.getElementById('calc-tw-type').value === 'etf' ? 0.1 : 0.3).toFixed(1)) + '%)</td><td style="text-align:right"><b>' + fmt(sellTax) + '</b></td></tr>' : '') +
     '<tr style="border-top:2px solid var(--border)"><td style="color:var(--muted)"><b>總交易成本</b></td><td style="text-align:right;color:var(--red)"><b>' + fmt(totalCost) + '</b></td></tr>' +
     '<tr><td style="color:var(--muted)"><b>淨損益</b></td><td style="text-align:right;color:' + (up ? 'var(--green)' : 'var(--red)') + '"><b>' + (up ? '+' : '') + fmt(netProfit) + '</b></td></tr>' +
     '<tr><td style="color:var(--muted)"><b>實際報酬率</b></td><td style="text-align:right;color:' + (up ? 'var(--green)' : 'var(--red)') + '"><b>' + (up ? '+' : '') + returnPct.toFixed(2) + '%</b></td></tr>' +
     '</table></div>' +
-    (market === 'tw' ? '<div style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center">※ 手續費最低收 NT$20（折扣後仍適用）· 證交稅 0.3% 僅賣出時收取 · ETF 證交稅為 0.1%</div>' : '<div style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center">※ 美股無證交稅 · 手續費依券商而異 · 複委託通常為 0.15%~0.5%</div>') +
+    (market === 'tw' ? '<div style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center">※ 手續費最低收 NT$20（折扣後仍適用）· 股票證交稅 0.3% 僅賣出時收取 · ETF 證交稅 0.1%</div>' : '<div style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center">※ 美股無證交稅 · 手續費依券商而異 · 複委託通常為 0.15%~0.5%</div>') +
     '</div>';
 }
 
@@ -3003,11 +3131,16 @@ function _buildIndustryData() { return {
 }; }
 
 let _industryTab = 'global';
-function loadIndustry(tab) {
+let _industryRenderTarget = 'industry-content';
+let _industryTabsTarget = 'industry-tabs';
+function loadIndustry(tab, targetId, tabsId) {
   _industryTab = tab;
-  document.querySelectorAll('#industry-tabs button').forEach((b,i) => b.classList.toggle('active', (tab==='global'?0:1)===i));
+  _industryRenderTarget = targetId || 'industry-content';
+  _industryTabsTarget = tabsId || 'industry-tabs';
+  document.querySelectorAll('#' + _industryTabsTarget + ' button').forEach((b,i) => b.classList.toggle('active', (tab==='global'?0:1)===i));
   const data = getIndustryData()[tab];
-  const ct = document.getElementById('industry-content');
+  const ct = document.getElementById(_industryRenderTarget);
+  if (!ct) return;
   const cycleColors = {hot:'#ef4444',warm:'#f59e0b',neutral:'#3b82f6',cool:'#8b5cf6',cold:'#1e2a3a'};
   const cycleText = {hot:'🔥 當紅',warm:'☀️ 回溫',neutral:'⚖️ 中性',cool:'🌧️ 偏冷',cold:'❄️ 萎靡'};
   const cycleScore = {hot:5,warm:4,neutral:3,cool:2,cold:1};
@@ -3126,18 +3259,34 @@ function loadIndustry(tab) {
 }
 
 function toggleIndustry(id) {
-  const d = document.getElementById('detail-' + id);
-  const a = document.getElementById('arrow-' + id);
+  const root = document.getElementById(_industryRenderTarget) || document;
+  const d = root.querySelector('#detail-' + id);
+  const a = root.querySelector('#arrow-' + id);
+  if (!d || !a) return;
   if (d.style.display === 'none') { d.style.display = 'block'; a.style.transform = 'rotate(180deg)'; }
   else { d.style.display = 'none'; a.style.transform = 'rotate(0deg)'; }
 }
 
 function showIndustryDetail(tab, id) {
-  loadIndustry(tab);
+  loadIndustry(tab, _industryRenderTarget, _industryTabsTarget);
   setTimeout(() => {
-    const el = document.getElementById('ind-' + id);
+    const root = document.getElementById(_industryRenderTarget) || document;
+    const el = root.querySelector('#ind-' + id);
     if (el) { el.scrollIntoView({behavior:'smooth',block:'start'}); toggleIndustry(id); }
   }, 100);
+}
+
+function loadMarketIndustry(tab) {
+  const target = document.getElementById('mkt-industry-content');
+  if (!target) return;
+  if (!document.getElementById('mkt-industry-tabs')) {
+    target.innerHTML =
+      '<div class="tab-bar" id="mkt-industry-tabs">' +
+      '<button class="active" onclick="loadMarketIndustry(\'global\')">🌍 全球產業</button>' +
+      '<button onclick="loadMarketIndustry(\'tw\')">🇹🇼 台灣產業</button>' +
+      '</div><div id="mkt-industry-body"></div>';
+  }
+  loadIndustry(tab || _industryTab || 'global', 'mkt-industry-body', 'mkt-industry-tabs');
 }
 
 // ============ STOCK HEATMAP ============
@@ -4693,14 +4842,7 @@ function switchMarketTab(tab) {
       });
     }
   } else if (tab === 'industry') {
-    const target = document.getElementById('mkt-industry-content');
-    if (!target.innerHTML) {
-      loadIndustry('global');
-      setTimeout(() => {
-        const src = document.getElementById('industry-content');
-        if (src && target) target.innerHTML = src.innerHTML;
-      }, 500);
-    }
+    loadMarketIndustry(_industryTab || 'global');
   } else if (tab === 'heatmap') {
     const target = document.getElementById('mkt-heatmap-content');
     if (!target.innerHTML || Date.now() - ((_hmLoadedAt && _hmLoadedAt['us']) || 0) > STALE_MS) {
@@ -7172,52 +7314,64 @@ const LongTermStockEngine = {
       const sd = fundData?.summaryDetail || {};
       const ks = fundData?.defaultKeyStatistics || {};
       const fd = fundData?.financialData || {};
-      const _r = v => v?.raw ?? v ?? 0;
-      const pe = _r(sd.trailingPE) || _r(sd.forwardPE) || 0;
-      const pb = _r(sd.priceToBook) || _r(ks.priceToBook) || 0;
-      const divYield = (_r(sd.dividendYield) || 0) * 100;
-      const roe = _r(fd.returnOnEquity) ? _r(fd.returnOnEquity) * 100 : 0;
-      const debtEquity = _r(fd.debtToEquity) || 0;
-      const revenueGrowth = _r(fd.revenueGrowth) ? _r(fd.revenueGrowth) * 100 : 0;
-      const profitMargin = _r(fd.profitMargins) ? _r(fd.profitMargins) * 100 : 0;
-      const earningsGrowth = (_r(fd.earningsGrowth) ? _r(fd.earningsGrowth) * 100 : 0) || revenueGrowth * 0.8;
-      const marketCap = _r(sd.marketCap) || 0;
+      const _r = v => v?.raw ?? v ?? null;
+      const pe = _r(sd.trailingPE) ?? _r(sd.forwardPE);
+      const pb = _r(sd.priceToBook) ?? _r(ks.priceToBook);
+      const divYield = _r(sd.dividendYield) != null ? _r(sd.dividendYield) * 100 : 0;
+      const roe = _r(fd.returnOnEquity) != null ? _r(fd.returnOnEquity) * 100 : null;
+      const debtEquityRaw = _r(fd.debtToEquity);
+      const debtEquity = debtEquityRaw != null ? (debtEquityRaw > 10 ? debtEquityRaw / 100 : debtEquityRaw) : null;
+      const revenueGrowth = _r(fd.revenueGrowth) != null ? _r(fd.revenueGrowth) * 100 : null;
+      const profitMargin = _r(fd.profitMargins) != null ? _r(fd.profitMargins) * 100 : null;
+      const earningsGrowth = _r(fd.earningsGrowth) != null ? _r(fd.earningsGrowth) * 100 : (revenueGrowth != null ? revenueGrowth * 0.8 : null);
+      const marketCap = _r(sd.marketCap) ?? _r(fundData?.price?.marketCap) ?? 0;
+      const coreFundMetrics = [pe, pb, roe, debtEquity, revenueGrowth, profitMargin].filter(v => v != null).length;
+      const dataStatus = coreFundMetrics >= 5 ? 'complete' : coreFundMetrics >= 3 ? 'partial' : 'missing';
 
       // === ① Growth Score (0-100, weight 0.30) ===
       let growthRaw = 0;
-      if (revenueGrowth > 30) growthRaw += 40;
-      else if (revenueGrowth > 20) growthRaw += 35;
-      else if (revenueGrowth > 10) growthRaw += 25;
-      else if (revenueGrowth > 5) growthRaw += 15;
-      else if (revenueGrowth > 0) growthRaw += 8;
-      if (earningsGrowth > 30) growthRaw += 35;
-      else if (earningsGrowth > 20) growthRaw += 28;
-      else if (earningsGrowth > 10) growthRaw += 20;
-      else if (earningsGrowth > 0) growthRaw += 10;
-      if (divYield > 0 && revenueGrowth > 5) growthRaw += 15; // Growing + paying dividends
-      else if (revenueGrowth > 15) growthRaw += 10; // High growth compensates no dividend
+      if (revenueGrowth != null) {
+        if (revenueGrowth > 30) growthRaw += 40;
+        else if (revenueGrowth > 20) growthRaw += 35;
+        else if (revenueGrowth > 10) growthRaw += 25;
+        else if (revenueGrowth > 5) growthRaw += 15;
+        else if (revenueGrowth > 0) growthRaw += 8;
+      }
+      if (earningsGrowth != null) {
+        if (earningsGrowth > 30) growthRaw += 35;
+        else if (earningsGrowth > 20) growthRaw += 28;
+        else if (earningsGrowth > 10) growthRaw += 20;
+        else if (earningsGrowth > 0) growthRaw += 10;
+      }
+      if (divYield > 0 && revenueGrowth != null && revenueGrowth > 5) growthRaw += 15; // Growing + paying dividends
+      else if (revenueGrowth != null && revenueGrowth > 15) growthRaw += 10; // High growth compensates no dividend
       growthRaw = Math.min(100, growthRaw);
 
       // === ② Valuation Score (0-100, weight 0.25) ===
       let valRaw = 0;
-      const earningsYield = pe > 0 ? (1 / pe * 100) : 0;
+      const earningsYield = pe != null && pe > 0 ? (1 / pe * 100) : 0;
       // PE-based
-      if (pe > 0 && pe < 12) valRaw += 30;
-      else if (pe < 18) valRaw += 25;
-      else if (pe < 25) valRaw += 15;
-      else if (pe < 35) valRaw += 8;
-      else valRaw += 0;
+      if (pe != null) {
+        if (pe > 0 && pe < 12) valRaw += 30;
+        else if (pe > 0 && pe < 18) valRaw += 25;
+        else if (pe > 0 && pe < 25) valRaw += 15;
+        else if (pe > 0 && pe < 35) valRaw += 8;
+      }
       // PB-based
-      if (pb > 0 && pb < 1.5) valRaw += 25;
-      else if (pb < 3) valRaw += 18;
-      else if (pb < 5) valRaw += 10;
-      else if (pb < 8) valRaw += 5;
+      if (pb != null) {
+        if (pb > 0 && pb < 1.5) valRaw += 25;
+        else if (pb > 0 && pb < 3) valRaw += 18;
+        else if (pb > 0 && pb < 5) valRaw += 10;
+        else if (pb > 0 && pb < 8) valRaw += 5;
+      }
       // PEG
-      const peg = (pe > 0 && revenueGrowth > 0) ? pe / (revenueGrowth * 100) : 99;
-      if (peg > 0 && peg < 0.5) valRaw += 25;
-      else if (peg < 1) valRaw += 20;
-      else if (peg < 1.5) valRaw += 12;
-      else if (peg < 2.5) valRaw += 5;
+      const peg = (pe != null && pe > 0 && revenueGrowth != null && revenueGrowth > 0) ? pe / revenueGrowth : null;
+      if (peg != null) {
+        if (peg > 0 && peg < 0.5) valRaw += 25;
+        else if (peg < 1) valRaw += 20;
+        else if (peg < 1.5) valRaw += 12;
+        else if (peg < 2.5) valRaw += 5;
+      }
       // Earnings yield vs risk-free
       const riskPremium = earningsYield - 4.5;
       if (riskPremium > 5) valRaw += 20;
@@ -7227,18 +7381,24 @@ const LongTermStockEngine = {
 
       // === ③ Financial Quality Score (0-100, weight 0.20) ===
       let qualityRaw = 0;
-      if (roe >= 25) qualityRaw += 30;
-      else if (roe >= 18) qualityRaw += 24;
-      else if (roe >= 12) qualityRaw += 16;
-      else if (roe >= 8) qualityRaw += 8;
-      if (profitMargin > 25) qualityRaw += 25;
-      else if (profitMargin > 15) qualityRaw += 18;
-      else if (profitMargin > 8) qualityRaw += 12;
-      else if (profitMargin > 0) qualityRaw += 5;
-      if (debtEquity >= 0 && debtEquity < 0.3) qualityRaw += 25;
-      else if (debtEquity < 0.6) qualityRaw += 18;
-      else if (debtEquity < 1) qualityRaw += 10;
-      else if (debtEquity < 2) qualityRaw += 5;
+      if (roe != null) {
+        if (roe >= 25) qualityRaw += 30;
+        else if (roe >= 18) qualityRaw += 24;
+        else if (roe >= 12) qualityRaw += 16;
+        else if (roe >= 8) qualityRaw += 8;
+      }
+      if (profitMargin != null) {
+        if (profitMargin > 25) qualityRaw += 25;
+        else if (profitMargin > 15) qualityRaw += 18;
+        else if (profitMargin > 8) qualityRaw += 12;
+        else if (profitMargin > 0) qualityRaw += 5;
+      }
+      if (debtEquity != null) {
+        if (debtEquity >= 0 && debtEquity < 0.3) qualityRaw += 25;
+        else if (debtEquity < 0.6) qualityRaw += 18;
+        else if (debtEquity < 1) qualityRaw += 10;
+        else if (debtEquity < 2) qualityRaw += 5;
+      }
       if (divYield >= 3) qualityRaw += 20;
       else if (divYield >= 2) qualityRaw += 15;
       else if (divYield >= 1) qualityRaw += 10;
@@ -7283,11 +7443,15 @@ const LongTermStockEngine = {
       else if (marketCap > 100e9) positionRaw += 30;   // Large cap
       else if (marketCap > 20e9) positionRaw += 20;    // Mid-large
       else if (marketCap > 5e9) positionRaw += 10;
-      if (profitMargin > 20 && roe > 15) positionRaw += 30; // Competitive moat proxy
-      else if (profitMargin > 10 && roe > 10) positionRaw += 20;
-      else if (profitMargin > 5) positionRaw += 10;
-      if (divYield > 0 && revenueGrowth > 5) positionRaw += 30; // Sustainable leadership
-      else if (divYield > 0 || revenueGrowth > 10) positionRaw += 15;
+      if (profitMargin != null && roe != null) {
+        if (profitMargin > 20 && roe > 15) positionRaw += 30; // Competitive moat proxy
+        else if (profitMargin > 10 && roe > 10) positionRaw += 20;
+        else if (profitMargin > 5) positionRaw += 10;
+      } else if (profitMargin != null && profitMargin > 5) {
+        positionRaw += 10;
+      }
+      if (divYield > 0 && revenueGrowth != null && revenueGrowth > 5) positionRaw += 30; // Sustainable leadership
+      else if (divYield > 0 || (revenueGrowth != null && revenueGrowth > 10)) positionRaw += 15;
       positionRaw = Math.min(100, positionRaw);
 
       // === WEIGHTED TOTAL (0-100) ===
@@ -7310,7 +7474,10 @@ const LongTermStockEngine = {
 
       // Decision: BUY / HOLD / AVOID
       let decision, decisionReason;
-      if (totalScore >= 65 && valuation !== 'overvalued') {
+      if (dataStatus === 'missing') {
+        decision = 'AVOID';
+        decisionReason = '核心基本面資料不足，暫不納入長線配置';
+      } else if (totalScore >= 65 && valuation !== 'overvalued') {
         decision = 'BUY';
         decisionReason = '高品質標的，估值合理，建議買入';
       } else if (totalScore >= 50 && valuation !== 'overvalued' && trend !== 'bearish') {
@@ -7322,6 +7489,10 @@ const LongTermStockEngine = {
       } else {
         decision = 'AVOID';
         decisionReason = '評分不足或估值過高，建議避開';
+      }
+      if (dataStatus === 'partial' && decision === 'BUY') {
+        decision = 'HOLD';
+        decisionReason = '基本面資料不完整，先列入觀察名單';
       }
 
       // Suggested allocation (% of long-term stock bucket)
@@ -7347,7 +7518,9 @@ const LongTermStockEngine = {
         ticker, price, totalScore,
         scores: { growth: growthRaw, valuation: valRaw, quality: qualityRaw, trend: trendRaw, position: positionRaw },
         weights: { growth: 0.30, valuation: 0.25, quality: 0.20, trend: 0.15, position: 0.10 },
-        metrics: { pe, pb, divYield, roe, debtEquity, revenueGrowth, profitMargin, earningsYield, peg: peg < 99 ? peg : null, mo6, vol, rsi, ma50, ma200, pctFromHigh, marketCap },
+        metrics: { pe, pb, divYield, roe, debtEquity, revenueGrowth, profitMargin, earningsYield, peg, mo6, vol, rsi, ma50, ma200, pctFromHigh, marketCap },
+        dataStatus,
+        coreFundMetrics,
         // DECISION OUTPUT
         valuation,
         trend,
@@ -9108,6 +9281,8 @@ function renderCryptoResults(results) {
 
 // ============ INIT ============
 document.getElementById('j-date').valueAsDate = new Date();
+updateJournalCostHint();
+calcMarketChange();
 // Restore page from URL hash — default to dashboard
 const _initHash = location.hash.slice(1);
 if (PAGES.includes(_initHash)) { showPage(_initHash); }
