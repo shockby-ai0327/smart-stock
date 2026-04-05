@@ -7939,6 +7939,7 @@ function renderRegimeDecision(regimeResult, targetAlloc, rateResult, totalCapita
 
 function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targetAlloc) {
   const decColor = d => ({ BUY: 'var(--green)', HOLD: 'var(--yellow)', AVOID: 'var(--red)' }[d] || 'var(--muted)');
+  const decLabel = d => ({ BUY: '買進', HOLD: '持有', AVOID: '迴避' }[d] || d);
   const decBg = d => ({ BUY: 'rgba(16,185,129,0.15)', HOLD: 'rgba(245,158,11,0.1)', AVOID: 'rgba(239,68,68,0.1)' }[d] || 'transparent');
   const valLabel = v => ({ undervalued: '低估', fair: '合理', overvalued: '高估' }[v] || v);
   const valColor = v => ({ undervalued: 'var(--green)', fair: 'var(--yellow)', overvalued: 'var(--red)' }[v]);
@@ -7964,7 +7965,7 @@ function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targ
         c += `<div style="background:var(--bg);border-radius:8px;padding:12px;border:1px solid rgba(16,185,129,0.3)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div><span style="font-size:16px;font-weight:700">${s.ticker}</span> <span style="font-size:12px;color:var(--muted)">${currSign}${s.price.toFixed(2)}</span></div>
-            <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">BUY</span>
+            <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">買進</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
             <div>評分 <b>${s.totalScore}</b>/100 (${s.grade})</div>
@@ -7996,8 +7997,8 @@ function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targ
       c += '</div>';
       return c;
     }
-    html += renderBuyCards(usSized, '🇺🇸 美股 BUY');
-    html += renderBuyCards(twSized, '🇹🇼 台股 BUY');
+    html += renderBuyCards(usSized, '🇺🇸 美股買進');
+    html += renderBuyCards(twSized, '🇹🇼 台股買進');
     html += '</div>';
   }
 
@@ -8017,7 +8018,7 @@ function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targ
     for (const s of stocks) {
       if (!s.decision) return t; // Enforcement: no decision = no display
       t += `<tr style="background:${decBg(s.decision)}">
-        <td><span style="background:${decColor(s.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${s.decision}</span></td>
+        <td><span style="background:${decColor(s.decision)};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">${decLabel(s.decision)}</span></td>
         <td><b>${s.ticker}</b></td>
         <td>${currSign}${s.price.toFixed(2)}</td>
         <td><b>${s.totalScore}</b></td>
@@ -8042,6 +8043,7 @@ function renderStockDecisions(usAll, twAll, usSized, twSized, totalCapital, targ
 
 function renderBondDecisions(bonds, rateResult, totalCapital, targetAlloc) {
   const decColor = d => ({ BUY: 'var(--green)', HOLD: 'var(--yellow)', REDUCE: 'var(--red)' }[d] || 'var(--muted)');
+  const decLabel = d => ({ BUY: '買進', HOLD: '持有', REDUCE: '減持' }[d] || d);
   const decBg = d => ({ BUY: 'rgba(16,185,129,0.15)', HOLD: 'rgba(245,158,11,0.1)', REDUCE: 'rgba(239,68,68,0.1)' }[d] || 'transparent');
   const durLabel = d => ({ short: '短久期', mid: '中久期', long: '長久期' }[d] || d);
   const currency = PortfolioLayer._getStore().currency || 'USD';
@@ -8062,7 +8064,7 @@ function renderBondDecisions(bonds, rateResult, totalCapital, targetAlloc) {
       html += `<div style="background:var(--bg);border-radius:8px;padding:12px;border:1px solid rgba(16,185,129,0.3)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <span style="font-size:15px;font-weight:700">${b.ticker}</span>
-          <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">BUY</span>
+          <span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700">買進</span>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${b.label} · ${durLabel(b.durationType)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:11px">
