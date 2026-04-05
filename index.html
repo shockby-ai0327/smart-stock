@@ -276,10 +276,12 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
   </div>
   <div class="main">
     <div id="page-home" class="page active">
-      <div style="text-align:center;padding:30px 20px 20px">
+      <div style="text-align:center;padding:20px 20px 12px">
         <div style="font-size:28px;font-weight:700;margin-bottom:4px">📊 Investment OS</div>
-        <p style="color:var(--muted);font-size:14px;margin-bottom:32px">多策略投資作業系統 — 選擇你的投資模式</p>
+        <p style="color:var(--muted);font-size:14px;margin-bottom:16px">多策略投資作業系統 — 選擇你的投資模式</p>
       </div>
+      <div id="home-regime-summary" style="max-width:900px;margin:0 auto 16px;padding:0 16px"></div>
+      <div id="home-portfolio-summary" style="max-width:900px;margin:0 auto 16px;padding:0 16px"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;max-width:900px;margin:0 auto;padding:0 16px">
         <div class="card" style="cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--border)" onclick="showPage('dashboard')" onmouseenter="this.style.transform='translateY(-4px)';this.style.boxShadow='0 8px 30px rgba(59,130,246,.15)'" onmouseleave="this.style.transform='';this.style.boxShadow=''">
           <div style="font-size:40px;margin-bottom:12px">🎯</div>
@@ -324,8 +326,6 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           </div>
         </div>
       </div>
-      <div id="home-regime-summary" style="max-width:900px;margin:24px auto 0;padding:0 16px"></div>
-      <div id="home-portfolio-summary" style="max-width:900px;margin:0 auto;padding:0 16px"></div>
     </div>
     <div id="page-dashboard" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
@@ -8389,22 +8389,142 @@ function renderDashPortfolioSummary() {
 }
 
 // ============ HOME PAGE ============
+let _homeLoaded = false;
 function loadHomePage() {
-  // Show market regime + portfolio summary on home
-  const s = JSON.parse(localStorage.getItem('ss_rebalance') || '{}');
-  const regime = s.lastRegime;
-  const homeRegime = document.getElementById('home-regime-summary');
-  if (homeRegime && regime) {
-    const regimeLabel = RegimeAllocator.getRegimeLabel(regime);
-    const alloc = PortfolioLayer.getAllocation();
-    const stance = { bull: '進攻', bear: '保守', sideways: '均衡', crisis: '全面防禦' }[regime] || '-';
-    const stanceColor = { bull: 'var(--green)', bear: 'var(--red)', sideways: 'var(--yellow)', crisis: 'var(--red)' }[regime] || 'var(--muted)';
-    homeRegime.innerHTML = `<div class="card" style="border-left:4px solid ${stanceColor}">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div><span style="font-size:13px;color:var(--muted)">Market Regime</span><br><span style="font-size:20px;font-weight:700;color:${stanceColor}">${regimeLabel}</span></div>
-        <div><span style="font-size:13px;color:var(--muted)">策略</span><br><span style="font-size:20px;font-weight:700;color:${stanceColor}">${stance}</span></div>
-        <div><span style="font-size:13px;color:var(--muted)">配置</span><br><span style="font-size:14px;font-weight:600">短${alloc.shortTerm}% / 長${alloc.longTerm}% / 債${alloc.bond}%</span></div>
+  // Auto-detect market regime on first visit
+  if (!_homeLoaded) {
+    _homeLoaded = true;
+    loadHomeDecisionSummary();
+  }
+}
+
+async function loadHomeDecisionSummary() {
+  const regimeEl = document.getElementById('home-regime-summary');
+  const pfEl = document.getElementById('home-portfolio-summary');
+  if (!regimeEl) return;
+
+  regimeEl.innerHTML = '<div class="card" style="text-align:center;padding:20px;color:var(--accent)">⏳ 偵測市場環境中...</div>';
+
+  try {
+    // Phase 1: Market Regime
+    const regimeResult = await RegimeAllocator.detectRegime();
+    const regime = regimeResult.regime;
+    const targetAlloc = RegimeAllocator.getAllocation(regime);
+
+    // Phase 2: Interest Rate
+    const rateResult = await InterestRateModel.analyze();
+
+    // Regime decision
+    let regimeDecision, regimeColor, regimeBg, regimeAdvice;
+    if (regime === 'bull' || regime === 'recovery') {
+      regimeDecision = 'BULL'; regimeColor = 'var(--green)'; regimeBg = 'rgba(16,185,129,0.08)';
+      regimeAdvice = '多頭市場 → 增加股票曝險，把握上漲趨勢';
+    } else if (regime === 'bear' || regime === 'crisis') {
+      regimeDecision = 'BEAR'; regimeColor = 'var(--red)'; regimeBg = 'rgba(239,68,68,0.08)';
+      regimeAdvice = '空頭市場 → 降低風險，增加債券與現金比重';
+    } else {
+      regimeDecision = 'SIDEWAYS'; regimeColor = 'var(--yellow)'; regimeBg = 'rgba(245,158,11,0.08)';
+      regimeAdvice = '盤整格局 → 均衡配置，等待方向確認';
+    }
+
+    // Rate decision
+    let rateDecision, rateColor;
+    if (rateResult.env === 'rising') { rateDecision = '短債為主'; rateColor = 'var(--red)'; }
+    else if (rateResult.env === 'falling') { rateDecision = '長債加碼'; rateColor = 'var(--green)'; }
+    else { rateDecision = '均衡配置'; rateColor = 'var(--yellow)'; }
+
+    // Overall investment decision
+    let overallDecision, overallColor;
+    if (regime === 'bull' || regime === 'recovery') {
+      overallDecision = '積極投資'; overallColor = 'var(--green)';
+    } else if (regime === 'bear' || regime === 'crisis') {
+      overallDecision = '保守防禦'; overallColor = 'var(--red)';
+    } else {
+      overallDecision = '穩健配置'; overallColor = 'var(--yellow)';
+    }
+
+    regimeEl.innerHTML = `<div class="card" style="border:2px solid ${regimeColor};background:${regimeBg};padding:24px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">MARKET REGIME</div>
+          <div style="font-size:42px;font-weight:800;letter-spacing:4px;color:${regimeColor}">${regimeDecision}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">${regimeAdvice}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">投資策略</div>
+          <div style="font-size:28px;font-weight:800;color:${overallColor}">${overallDecision}</div>
+        </div>
       </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="text-align:center;background:var(--bg);padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">短線操盤</div>
+          <div style="font-size:22px;font-weight:700">${targetAlloc.shortTerm}%</div>
+        </div>
+        <div style="text-align:center;background:var(--bg);padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">長線持股</div>
+          <div style="font-size:22px;font-weight:700">${targetAlloc.longTerm}%</div>
+        </div>
+        <div style="text-align:center;background:var(--bg);padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">債券配置</div>
+          <div style="font-size:22px;font-weight:700">${targetAlloc.bond}%</div>
+        </div>
+        <div style="text-align:center;background:var(--bg);padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px">債券策略</div>
+          <div style="font-size:14px;font-weight:700;color:${rateColor}">${rateDecision}</div>
+        </div>
+      </div>
+    </div>`;
+
+    // Action cards: what to do NOW
+    pfEl.innerHTML = `<div class="card" style="padding:20px;margin-bottom:16px">
+      <h3 style="margin-bottom:12px">📋 現在該做什麼？</h3>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div onclick="showPage('dashboard')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent);transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
+          <span style="font-size:24px">🎯</span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">掃描今日短線機會</div>
+            <div style="font-size:11px;color:var(--muted)">策略匹配 → 評分 → 進出場價位</div>
+          </div>
+          <span style="color:var(--accent);font-size:13px;font-weight:600">GO →</span>
+        </div>
+        <div onclick="showPage('portfolio')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--green);transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
+          <span style="font-size:24px">💼</span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">檢視長線配置建議</div>
+            <div style="font-size:11px;color:var(--muted)">Top 5 選股 → 倉位權重 → 再平衡</div>
+          </div>
+          <span style="color:var(--green);font-size:13px;font-weight:600">GO →</span>
+        </div>
+        <div onclick="showPage('bonds')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--yellow);transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
+          <span style="font-size:24px">🏦</span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">債券 ${rateDecision}</div>
+            <div style="font-size:11px;color:var(--muted)">利率${rateResult.env === 'rising' ? '上升' : rateResult.env === 'falling' ? '下降' : '穩定'} → ${rateResult.durationTarget.label}</div>
+          </div>
+          <span style="color:var(--yellow);font-size:13px;font-weight:600">GO →</span>
+        </div>
+        <div onclick="showPage('crypto')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid #a855f7;transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
+          <span style="font-size:24px">₿</span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">Crypto 市場分析</div>
+            <div style="font-size:11px;color:var(--muted)">波動率 → 情緒 → 資金流向 → 決策</div>
+          </div>
+          <span style="color:#a855f7;font-size:13px;font-weight:600">GO →</span>
+        </div>
+      </div>
+    </div>`;
+
+    // Save regime for other pages
+    const s = JSON.parse(localStorage.getItem('ss_rebalance') || '{}');
+    s.lastRegime = regime;
+    localStorage.setItem('ss_rebalance', JSON.stringify(s));
+
+  } catch(e) {
+    regimeEl.innerHTML = `<div class="card" style="text-align:center;padding:24px">
+      <div style="font-size:32px;margin-bottom:8px">⚠️</div>
+      <p style="color:var(--red);margin-bottom:4px">市場偵測失敗</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">${e.message}</p>
+      <button class="btn btn-primary" onclick="_homeLoaded=false;loadHomeDecisionSummary()">重試</button>
     </div>`;
   }
 }
