@@ -441,6 +441,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
           <button class="btn btn-ghost btn-sm" onclick="exportPortfolioReport()">匯出報告</button>
         </div>
       </div>
+      <div id="pf-decision-header"></div>
       <div id="pf-regime-alloc"></div>
       <div id="pf-allocation-chart"></div>
       <div id="pf-stock-ranking"></div>
@@ -460,6 +461,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
         <div><h2 style="display:inline">🏦 Bond & Fixed Income System</h2> <span id="bonds-updated" style="font-size:11px;color:var(--muted)"></span></div>
         <button class="btn btn-primary" onclick="runBondSystem()" id="bond-run-btn">刷新分析</button>
       </div>
+      <div id="bond-decision-header"></div>
       <div id="bond-rate-model"></div>
       <div id="bond-allocation"></div>
       <div id="bond-decisions"></div>
@@ -475,6 +477,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
         <div><h2 style="display:inline">₿ Crypto System</h2> <span id="crypto-updated" style="font-size:11px;color:var(--muted)"></span></div>
         <button class="btn btn-primary" onclick="runCryptoSystem()" id="crypto-run-btn">刷新分析</button>
       </div>
+      <div id="crypto-decision-header"></div>
       <div id="crypto-volatility"></div>
       <div id="crypto-sentiment"></div>
       <div id="crypto-flow"></div>
@@ -7798,7 +7801,8 @@ async function runPortfolioEngine() {
     _updatePfStatus('Phase 2/7：分析利率環境...');
     const rateResult = await InterestRateModel.analyze();
 
-    // Phase 3: Render regime decision + allocation pie chart
+    // Phase 3: Decision Header + Regime decision + allocation pie chart
+    renderPortfolioDecisionHeader(regime, targetAlloc, regimeResult);
     renderRegimeDecision(regimeResult, targetAlloc, rateResult, totalCapital);
 
     // Phase 4: Long-term stock decisions
@@ -8430,7 +8434,8 @@ async function runBondSystem() {
     bonds = BondEngine.decideBonds(bonds, rateResult.env, regimeResult.regime);
     renderBondSystemDecisions(bonds, rateResult, regimeResult.regime);
 
-    // Phase 3.5: Render bond allocation pie
+    // Phase 3.5: Decision Header + Allocation pie
+    renderBondDecisionHeader(rateResult, bonds, regimeResult.regime);
     renderBondAllocation(bonds, rateResult, regimeResult.regime);
 
     // Phase 4: Duration analysis
@@ -8443,6 +8448,171 @@ async function runBondSystem() {
   } finally {
     btn.disabled = false; btn.textContent = '刷新分析';
   }
+}
+
+// ============ DECISION HEADERS (Top-Level Page Decisions) ============
+
+function renderBondDecisionHeader(rateResult, bonds, regime) {
+  const buyCount = bonds.filter(b => b.decision === 'BUY').length;
+  const holdCount = bonds.filter(b => b.decision === 'HOLD').length;
+  const reduceCount = bonds.filter(b => b.decision === 'REDUCE').length;
+  const avgYield = bonds.length ? (bonds.reduce((s, b) => s + (b.divYield || 0), 0) / bonds.length).toFixed(2) : '0';
+
+  let decision, decColor, decBg, reason, score;
+  if (rateResult.env === 'rising') {
+    decision = '短債為主';
+    decColor = 'var(--red)';
+    decBg = 'rgba(239,68,68,0.08)';
+    reason = '利率上升 → 短天期債券優先，避免長債價格下跌風險';
+    score = Math.max(20, 60 - reduceCount * 10);
+  } else if (rateResult.env === 'falling') {
+    decision = '長債加碼';
+    decColor = 'var(--green)';
+    decBg = 'rgba(16,185,129,0.08)';
+    reason = '利率下降 → 鎖定長天期殖利率，享受債券價格上漲';
+    score = Math.min(95, 70 + buyCount * 5);
+  } else {
+    decision = '均衡配置';
+    decColor = 'var(--yellow)';
+    decBg = 'rgba(245,158,11,0.08)';
+    reason = '利率穩定 → 中久期均衡配置，平衡收益與風險';
+    score = 50 + buyCount * 5;
+  }
+  score = Math.min(100, Math.max(0, score));
+
+  const el = document.getElementById('bond-decision-header');
+  if (!el) return;
+  el.innerHTML = `<div class="card" style="margin-bottom:16px;border:2px solid ${decColor};background:${decBg};padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">BOND DECISION</div>
+        <div style="font-size:36px;font-weight:800;letter-spacing:3px;color:${decColor}">${decision}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">${reason}</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:48px;font-weight:800;color:${decColor}">${score}</div>
+        <div style="font-size:11px;color:var(--muted)">Score</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--green)">${buyCount}</div><div style="font-size:10px;color:var(--muted)">BUY</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--yellow)">${holdCount}</div><div style="font-size:10px;color:var(--muted)">HOLD</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--red)">${reduceCount}</div><div style="font-size:10px;color:var(--muted)">REDUCE</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--accent)">${avgYield}%</div><div style="font-size:10px;color:var(--muted)">平均殖利率</div></div>
+    </div>
+  </div>`;
+}
+
+function renderCryptoDecisionHeader(results) {
+  const avgVol = results.reduce((s, c) => s + c.vol, 0) / results.length;
+  const avgRsi = results.reduce((s, c) => s + c.rsi, 0) / results.length;
+  const buyCount = results.filter(c => c.decision === 'BUY').length;
+  const sellCount = results.filter(c => c.decision === 'SELL').length;
+  const holdCount = results.filter(c => c.decision === 'HOLD').length;
+  const waitCount = results.filter(c => c.decision === 'WAIT').length;
+  const avgMo30 = results.reduce((s, c) => s + c.mo30d, 0) / results.length;
+
+  let decision, decColor, decBg, reason, score;
+  if (avgVol > 80 && avgRsi > 65) {
+    decision = 'REDUCE';
+    decColor = 'var(--red)';
+    decBg = 'rgba(239,68,68,0.08)';
+    reason = '高波動 + 超買 → 減少曝險，鎖定利潤';
+    score = Math.max(10, 30 - sellCount * 5);
+  } else if (avgRsi < 35 || (avgMo30 < -15 && avgVol < 80)) {
+    decision = 'ACCUMULATE';
+    decColor = 'var(--green)';
+    decBg = 'rgba(16,185,129,0.08)';
+    reason = '超賣區間 → 逐步建倉，分批買入';
+    score = Math.min(90, 65 + buyCount * 5);
+  } else if (avgVol > 60 && avgRsi >= 40 && avgRsi <= 65) {
+    decision = 'TRADE';
+    decColor = '#f97316';
+    decBg = 'rgba(249,115,22,0.08)';
+    reason = '中高波動 + RSI 中性 → 短線波段交易';
+    score = 50 + (buyCount - sellCount) * 3;
+  } else {
+    decision = 'HOLD';
+    decColor = 'var(--yellow)';
+    decBg = 'rgba(245,158,11,0.08)';
+    reason = '市場平穩 → 持有觀望，等待方向明確';
+    score = 50;
+  }
+  score = Math.min(100, Math.max(0, score));
+
+  const sentimentCounts = {};
+  for (const c of results) { sentimentCounts[c.sentiment] = (sentimentCounts[c.sentiment] || 0) + 1; }
+  const topSentiment = Object.entries(sentimentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Neutral';
+
+  const el = document.getElementById('crypto-decision-header');
+  if (!el) return;
+  el.innerHTML = `<div class="card" style="margin-bottom:16px;border:2px solid ${decColor};background:${decBg};padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">CRYPTO DECISION</div>
+        <div style="font-size:36px;font-weight:800;letter-spacing:3px;color:${decColor}">${decision}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">${reason}</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:48px;font-weight:800;color:${decColor}">${score}</div>
+        <div style="font-size:11px;color:var(--muted)">Score</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--green)">${buyCount}</div><div style="font-size:10px;color:var(--muted)">BUY</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--yellow)">${holdCount}</div><div style="font-size:10px;color:var(--muted)">HOLD</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--red)">${sellCount}</div><div style="font-size:10px;color:var(--muted)">SELL</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--muted)">${waitCount}</div><div style="font-size:10px;color:var(--muted)">WAIT</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700">${avgVol.toFixed(0)}%</div><div style="font-size:10px;color:var(--muted)">Avg Vol</div></div>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700">${avgRsi.toFixed(0)}</div><div style="font-size:10px;color:var(--muted)">Avg RSI</div></div>
+      <div style="text-align:center"><div style="font-size:14px;font-weight:600">${topSentiment}</div><div style="font-size:10px;color:var(--muted)">情緒</div></div>
+    </div>
+  </div>`;
+}
+
+function renderPortfolioDecisionHeader(regime, alloc, regimeResult) {
+  let decision, decColor, decBg, reason, score;
+  const r = regime || 'sideways';
+  if (r === 'bull' || r === 'recovery') {
+    decision = 'RISK-ON';
+    decColor = 'var(--green)';
+    decBg = 'rgba(16,185,129,0.08)';
+    reason = '市場多頭 → 增加股票配置，把握上漲動能';
+    score = 78;
+  } else if (r === 'bear' || r === 'crisis') {
+    decision = 'DEFENSIVE';
+    decColor = 'var(--red)';
+    decBg = 'rgba(239,68,68,0.08)';
+    reason = '市場空頭 → 防禦為主，增加債券與現金比重';
+    score = 35;
+  } else {
+    decision = 'BALANCED';
+    decColor = 'var(--yellow)';
+    decBg = 'rgba(245,158,11,0.08)';
+    reason = '盤整市場 → 均衡配置，保持靈活調整空間';
+    score = 55;
+  }
+
+  const el = document.getElementById('pf-decision-header');
+  if (!el) return;
+  el.innerHTML = `<div class="card" style="margin-bottom:16px;border:2px solid ${decColor};background:${decBg};padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">PORTFOLIO DECISION</div>
+        <div style="font-size:36px;font-weight:800;letter-spacing:3px;color:${decColor}">${decision}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">${reason}</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:48px;font-weight:800;color:${decColor}">${score}</div>
+        <div style="font-size:11px;color:var(--muted)">Score</div>
+      </div>
+    </div>
+    ${alloc ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="text-align:center"><div style="font-size:24px;font-weight:700">${alloc.shortTerm || 0}%</div><div style="font-size:10px;color:var(--muted)">短線</div></div>
+      <div style="text-align:center"><div style="font-size:24px;font-weight:700">${alloc.longTerm || 0}%</div><div style="font-size:10px;color:var(--muted)">長線</div></div>
+      <div style="text-align:center"><div style="font-size:24px;font-weight:700">${alloc.bond || 0}%</div><div style="font-size:10px;color:var(--muted)">債券</div></div>
+    </div>` : ''}
+  </div>`;
 }
 
 function renderBondRateModel(rateResult) {
@@ -8700,6 +8870,9 @@ async function runCryptoSystem() {
 }
 
 function renderCryptoResults(results) {
+  // Decision Header first
+  renderCryptoDecisionHeader(results);
+
   const sentColor = s => ({ 'Extreme Greed': 'var(--red)', 'Greed': '#f97316', 'Neutral': 'var(--yellow)', 'Fear': 'var(--accent)', 'Extreme Fear': 'var(--green)' }[s] || 'var(--muted)');
   const decColor = d => ({ BUY: 'var(--green)', SELL: 'var(--red)', HOLD: 'var(--yellow)', WAIT: 'var(--muted)' }[d] || 'var(--muted)');
   const flowColor = f => ({ Inflow: 'var(--green)', Outflow: 'var(--red)', Neutral: 'var(--muted)' }[f]);
