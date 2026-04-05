@@ -433,7 +433,7 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
     </div>
     <div id="page-portfolio" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <h2>💼 資產配置決策系統</h2>
+        <div><h2 style="display:inline">💼 資產配置決策系統</h2> <span id="portfolio-updated" style="font-size:11px;color:var(--muted)"></span></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input id="pf-capital-quick" type="number" placeholder="總資本" style="padding:6px 12px;width:140px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px" onchange="PortfolioLayer.setTotalCapital(parseFloat(this.value)||0)">
           <button class="btn btn-primary" onclick="runPortfolioEngine()" id="pf-run-btn">分析配置</button>
@@ -457,8 +457,8 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
     </div>
     <div id="page-bonds" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <h2>🏦 Bond & Fixed Income System</h2>
-        <button class="btn btn-primary" onclick="runBondSystem()" id="bond-run-btn">分析債券</button>
+        <div><h2 style="display:inline">🏦 Bond & Fixed Income System</h2> <span id="bonds-updated" style="font-size:11px;color:var(--muted)"></span></div>
+        <button class="btn btn-primary" onclick="runBondSystem()" id="bond-run-btn">刷新分析</button>
       </div>
       <div id="bond-rate-model"></div>
       <div id="bond-allocation"></div>
@@ -472,8 +472,8 @@ details[open] > .detail-summary::before{transform:rotate(90deg)}
     </div>
     <div id="page-crypto" class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <h2>₿ Crypto System</h2>
-        <button class="btn btn-primary" onclick="runCryptoSystem()" id="crypto-run-btn">分析加密貨幣</button>
+        <div><h2 style="display:inline">₿ Crypto System</h2> <span id="crypto-updated" style="font-size:11px;color:var(--muted)"></span></div>
+        <button class="btn btn-primary" onclick="runCryptoSystem()" id="crypto-run-btn">刷新分析</button>
       </div>
       <div id="crypto-volatility"></div>
       <div id="crypto-sentiment"></div>
@@ -4606,6 +4606,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ============ URL HASH ROUTING ============
+function showError(containerId, message, retryFn) {
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = '<div class="card" style="text-align:center;padding:40px 20px"><div style="font-size:32px;margin-bottom:12px">⚠️</div><p style="color:var(--red);margin-bottom:4px">載入失敗</p><p style="font-size:12px;color:var(--muted);margin-bottom:16px">' + message + '</p><button class="btn btn-primary" onclick="' + retryFn + '">重試</button></div>';
+}
+
+function showUpdatedTime(spanId) {
+  const el = document.getElementById(spanId);
+  if (el) el.textContent = '更新：' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+}
+
 function showPage(name) {
   // Legacy redirects: old pages now live under market tab
   const legacyMarket = { indices: 'indices', sentiment: 'sentiment', industry: 'industry', heatmap: 'heatmap', news: 'news' };
@@ -4631,11 +4641,11 @@ function showPage(name) {
   if (name === 'journal') renderJournal();
   if (name === 'review') renderReview();
   if (name === 'backtest') loadBacktestPage();
-  if (name === 'portfolio') loadPortfolioPage();
+  if (name === 'portfolio') { loadPortfolioPage(); if (!_pfLoaded && PortfolioLayer.getTotalCapital() > 0) runPortfolioEngine(); }
   if (name === 'dashboard') loadDashboard();
   if (name === 'home') loadHomePage();
-  if (name === 'bonds') loadBondsPage();
-  if (name === 'crypto') loadCryptoPage();
+  if (name === 'bonds') { loadBondsPage(); if (!_bondsLoaded) runBondSystem(); }
+  if (name === 'crypto') { loadCryptoPage(); if (!_cryptoLoaded) runCryptoSystem(); }
   if (name === 'market') switchMarketTab('indices');
 }
 
@@ -7823,6 +7833,7 @@ async function runPortfolioEngine() {
     renderHoldings();
 
     _pfLoaded = true;
+    showUpdatedTime('portfolio-updated');
     _pfLoadedAt = Date.now();
     _updatePfStatus('');
 
@@ -7832,7 +7843,7 @@ async function runPortfolioEngine() {
     LongTermPerformance.recordSnapshot({ totalValue: PortfolioLayer.getTotalValue() || totalCapital, regime, rateEnv: rateResult.env });
 
   } catch(e) {
-    _updatePfStatus('決策錯誤: ' + e.message);
+    showError('pf-regime-alloc', e.message, 'runPortfolioEngine()');
   } finally {
     btn.disabled = false; btn.textContent = '分析配置';
   }
@@ -8426,10 +8437,11 @@ async function runBondSystem() {
     renderBondDuration(bonds, rateResult);
 
     _bondsLoaded = true;
+    showUpdatedTime('bonds-updated');
   } catch(e) {
-    document.getElementById('bond-rate-model').innerHTML = `<div class="card" style="color:var(--red)">錯誤: ${e.message}</div>`;
+    showError('bond-rate-model', e.message, 'runBondSystem()');
   } finally {
-    btn.disabled = false; btn.textContent = '分析債券';
+    btn.disabled = false; btn.textContent = '刷新分析';
   }
 }
 
@@ -8674,10 +8686,16 @@ async function runCryptoSystem() {
 
     // Render
     renderCryptoResults(results);
+    if (results.length < CRYPTO_ASSETS.length) {
+      const failed = CRYPTO_ASSETS.length - results.length;
+      document.getElementById('crypto-decisions').insertAdjacentHTML('afterbegin',
+        '<div style="font-size:11px;color:var(--yellow);padding:4px 8px;margin-bottom:8px">⚠️ ' + failed + ' 個幣種載入失敗，顯示部分結果</div>');
+    }
   } catch(e) {
-    document.getElementById('crypto-volatility').innerHTML = `<div class="card" style="color:var(--red)">錯誤: ${e.message}</div>`;
+    showError('crypto-volatility', e.message, 'runCryptoSystem()');
   } finally {
-    btn.disabled = false; btn.textContent = '分析加密貨幣';
+    btn.disabled = false; btn.textContent = '刷新分析';
+    showUpdatedTime('crypto-updated');
   }
 }
 
