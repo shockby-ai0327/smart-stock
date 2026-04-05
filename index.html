@@ -8505,15 +8505,15 @@ async function loadHomeDecisionSummary() {
             <div style="font-weight:600;margin-bottom:2px">掃描今日短線機會</div>
             <div style="font-size:11px;color:var(--muted)">策略匹配 → 評分 → 進出場價位</div>
           </div>
-          <span style="color:var(--accent);font-size:13px;font-weight:600">GO →</span>
+          <span style="color:var(--accent);font-size:13px;font-weight:600">前往 →</span>
         </div>
         <div onclick="showPage('portfolio')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--green);transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
           <span style="font-size:24px">💼</span>
           <div style="flex:1">
             <div style="font-weight:600;margin-bottom:2px">檢視長線配置建議</div>
-            <div style="font-size:11px;color:var(--muted)">Top 5 選股 → 倉位權重 → 再平衡</div>
+            <div style="font-size:11px;color:var(--muted)">前 5 名選股 → 倉位權重 → 再平衡</div>
           </div>
-          <span style="color:var(--green);font-size:13px;font-weight:600">GO →</span>
+          <span style="color:var(--green);font-size:13px;font-weight:600">前往 →</span>
         </div>
         <div onclick="showPage('bonds')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--yellow);transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
           <span style="font-size:24px">🏦</span>
@@ -8521,15 +8521,15 @@ async function loadHomeDecisionSummary() {
             <div style="font-weight:600;margin-bottom:2px">債券 ${rateDecision}</div>
             <div style="font-size:11px;color:var(--muted)">利率${rateResult.env === 'rising' ? '上升' : rateResult.env === 'falling' ? '下降' : '穩定'} → ${rateResult.durationTarget.label}</div>
           </div>
-          <span style="color:var(--yellow);font-size:13px;font-weight:600">GO →</span>
+          <span style="color:var(--yellow);font-size:13px;font-weight:600">前往 →</span>
         </div>
         <div onclick="showPage('crypto')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid #a855f7;transition:transform .15s" onmouseenter="this.style.transform='translateX(4px)'" onmouseleave="this.style.transform=''">
           <span style="font-size:24px">₿</span>
           <div style="flex:1">
-            <div style="font-weight:600;margin-bottom:2px">Crypto 市場分析</div>
+            <div style="font-weight:600;margin-bottom:2px">加密貨幣市場分析</div>
             <div style="font-size:11px;color:var(--muted)">波動率 → 情緒 → 資金流向 → 決策</div>
           </div>
-          <span style="color:#a855f7;font-size:13px;font-weight:600">GO →</span>
+          <span style="color:#a855f7;font-size:13px;font-weight:600">前往 →</span>
         </div>
       </div>
     </div>`;
